@@ -28,7 +28,7 @@ import glob
 import time
 import cmocean
 import time
-import tqdm
+#import tqdm
 import sys
 sys.path.append("/Users/gliu/Downloads/02_Research/01_Projects/01_AMV/00_Commons/03_Scripts/")
 from amv import proc,viz
@@ -43,10 +43,12 @@ from pylab import cm
 
 #%% User Edits
 
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210215/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210224/"
 resmooth   = False
 debug      = True
 
+
+mons3      = ('Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec')
 #%% Functions
 def coarsen_byavg(invar,lat,lon,deg,tol,latweight=True,verbose=True,ignorenan=False):
     """
@@ -332,7 +334,22 @@ if debug:
 # ax.set_extent(bbox)
 #%% Restrict to a time
 
-sla_5deg = sla_5deg[0:240,:,:]
+# Limit to particular period
+start = '1993-01'
+end   = '2013-01'
+
+# Convert Datestrings
+timesmon = np.datetime_as_string(times,unit="M")
+
+# Find indices
+idstart  = np.where(timesmon==start)[0][0]
+idend    = np.where(timesmon==end)[0][0]
+
+# Restrict Data
+sla_5deg = sla_5deg[idstart:idend,:,:]
+timeslim = timesmon[idstart:idend]
+timesyr  = np.datetime_as_string(times,unit="Y")[idstart:idend]
+
 
 
     
@@ -372,21 +389,85 @@ ax.plot(sla_5deg[:,klat,klon],label="Unfiltered")
 ax.plot(sla_lp[:,klat,klon],label="Filtered (Butterworth)")
 ax.legend()
 
+
+
 ntime,nlat5,nlon5 = sla_5deg.shape
 gmsl_smooth = np.nanmean(sla_5deg,(1,2))
-gmsl = np.nanmean(sla,(0,1))
+gmsl = np.nanmean(sla,(1,2))
+gmsl_lp = np.nanmean(sla_lp,(1,2))  
+
+
+# Plot Global Mean Sea Level
+fig,ax = plt.subplots(1,1)
+ax.set_title("Global Mean Sea Level")
+ax.set_xticks(np.arange(0,240,12))
+ax.set_xticklabels(timesyr[::12],rotation = 45)
+ax.set_ylabel("SSHA (m)")
+ax.set_xlabel("Time (Years)")
+ax.grid(True,ls='dotted')
+ax.plot(gmsl[idstart:idend],label="Raw",color='k')
+ax.plot(gmsl_smooth,label="After Spatial Smoothing",color='r',ls='dashdot')
+ax.plot(gmsl_lp,label="Low-Pass Filtered",color='b')
+ax.legend()
+plt.savefig(outfigpath+"GMSL.png",dpi=200)
+
+
+#%% Explore seasonal cycle removal
+
+
+# Locate Point
+lonfss = 325
+latfss = 10
+fig,ax = plt.subplots(1,1)
+pcm = ax.pcolormesh(lon5,lat5,sla_5deg[0,:,:],cmap=cmap)
+ax.scatter([lonfss],[latfss],s=75,marker="X",color='k')
+fig.colorbar(pcm,ax=ax)
+ax.set_title("Lon %i Lat %i" % (lonfss,latfss))
+plt.savefig(outfigpath+"Locator_lon%ilat%i.png" % (lonfss,latfss),dpi=200)
+
+# Find Seasonal Cycle
+klonss,klatss = proc.find_latlon(325,5,lon5,lat5)
+slapt         = sla_5deg[:,klatss,klonss].reshape(20,12)
+slaptlp       = sla_lp[:,klatss,klonss].reshape(20,12)
+
+# Try Plotting Sea Level
+fig,axs=plt.subplots(2,1,sharey=True)
+ax = axs[0]
+ax.set_title("Before Lowpass Filter")
+ax.plot(mons3,slapt.T,alpha=0.2,color='gray',label="")
+ax.plot(mons3,slapt.mean(0),color='k',label="Mean")
+ax.set_ylim([-.2,.2])
+ax.legend()
+ax.grid(True,ls='dotted')
+
+ax = axs[1]
+ax.set_title("After Lowpass Filter")
+ax.plot(mons3,slaptlp.T,alpha=0.2,color='gray',label="")
+ax.plot(mons3,slaptlp.mean(0),color='k',label="Mean")
+ax.grid(True,ls='dotted')
+
+plt.suptitle("Seasonal Cycle at Lon %i Lat %i (%s to %s)"% (lonfss,latfss,start,end))
+plt.tight_layout()
+plt.savefig(outfigpath+"SeasonalCycle_Removal_LPF_lon%ilat%i.png"%(lonfss,latfss),dpi=200)
+
+# Try removing Seasonal Cycle using Sinusoids
+x,E = proc.remove_ss_sinusoid(slapt.flatten()[:,None])
+slapt_ss  = E@x
+slaptrm   = slapt.flatten()-slapt_ss.squeeze() 
+
 
 fig,ax = plt.subplots(1,1)
-ax.plot(gmsl_smooth,label="Smooth")
-ax.plot(gmsl,label="Original")
-ax.legend()
+ax.plot(sla_5deg[:,klatss,klonss],label="After Spatial Smoothing",color='k')
+ax.plot(slapt_ss,label="Estimated Cycle",color='red')
+ax.plot(slaptrm.squeeze(),label="Deseasonalized Data", color='b')
+
 
 #%% Check to see if the dataset has strong seasonal cycle
 
+# fig,ax = plt.subplots(1,1)
+# pcm = ax.pcolormesh(lon5,lat5,sla_5deg[0,:,:])
+# ax.scatter([])
 
-fig,ax = plt.subplots(1,1)
-pcm = ax.pcolormesh(lon5,lat5,sla_5deg[0,:,:])
-ax.scatter([])
 
 #%% 5) Calculate correlation matrix
 
@@ -406,6 +487,18 @@ if debug: # Check to make sure the points are not missing
 srho = srho[:npts,:npts]
 scov = scov[:npts,:npts]
 
+
+
+
+
+
+    
+    
+    
+    
+    
+    
+    
 #%% 6) Calculate Distance matrix
 
 # Make pairs of coordinates (need to check if this is done properly)
@@ -518,7 +611,7 @@ ax.scatter([lonf],[latf],s=200,c='k',marker='x')
 fig.colorbar(pcm,ax=ax,fraction=0.02)
 plt.savefig("%sDistanceMatrixFinal_%s.png"%(outfigpath,locfn),dpi=200,transparent=True)
 
-#%%
+#%% Do Clustering!
 
 
 from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
@@ -538,12 +631,15 @@ linked = linkage(cdist,'weighted')
 #             distance_sort='descending',
 #             show_leaf_counts=True)
 
-test = fcluster(linked, nclusters,criterion='maxclust')
+clusterout = fcluster(linked, nclusters,criterion='maxclust')
 
 clustered = np.zeros(nlat5*nlon5)*np.nan
-clustered[okpts] = test
+clustered[okpts] = clusterout
 clustered = clustered.reshape(nlat5,nlon5)
 
+for i in range(nclusters):
+    cid = i+1
+    print("Found %i points in cluster %i" % ((clustered==cid).sum(),cid))
 
 #lon5_180,clustered = proc.lon360to180(lon5,clustered.T[:,:,None],autoreshape=True)
 #clustered = clustered.squeeze().T
@@ -578,6 +674,257 @@ plt.savefig("%sCluster_results_n%i.png"%(outfigpath,nclusters),dpi=200,transpare
 #plt.pcolormesh(nlat5,nlon5,clustered)
 
 plt.show()
+
+#%% Quantify Uncertainty in each group
+
+
+uncertout = np.zeros(clusterout.shape)
+for i in tqdm(range(len(clusterout))):
+    covpt     = scov[i,:]     # 
+    cid       = clusterout[i] #
+    covin     = covpt[np.where(clusterout==cid)]
+    covout    = covpt[np.where(clusterout!=cid)]
+    uncertout[i] = np.mean(covin)/np.mean(covout)
+    
+
+# Apply rules from Thompson and Merrifield
+# if uncert > 2, set to 2
+# if uncert <0.5, set to 0
+uncertout[uncertout>2]   = 2
+uncertout[uncertout<0.5] = 0 
+
+
+# Remap
+uncert = np.zeros(nlat5*nlon5)*np.nan
+uncert[okpts] = uncertout
+uncert = uncert.reshape(nlat5,nlon5)
+
+
+
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax = add_coast_grid(ax)
+pcm=plt.pcolormesh(lon5,lat5,uncert,vmin=0,vmax=2,cmap='copper',transform=ccrs.PlateCarree())
+ax.set_title(r"Uncertainty $(<\sigma^{2}_{out,x}>/<\sigma^{2}_{in,x}>)$")
+fig.colorbar(pcm,ax=ax,fraction=0.02)
+plt.savefig(outfigpath+"Uncertainty.png",dpi=200)
+
+
+
+# Separate clusters out by section
+ucolors = ('Blues','Purples','Greys','Blues','Reds','Oranges')
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax = add_coast_grid(ax)
+for i in range(nclusters):
+    
+    cid = i+1
+    print(cid)
+    cuncert = uncert.copy()
+    cuncert[clustered!=cid] *= np.nan
+    print("Found %i points in cluster %i" % ((clustered==cid).sum(),cid))
+    #cuncert[~np.isnan(cuncert)]=2
+    ax.pcolormesh(lon5,lat5,cuncert,vmin=0,vmax=2,cmap=ucolors[i],transform=ccrs.PlateCarree())
+    #fig.colorbar(pcm,ax=ax)
+    
+#ax.contour(lon5,lat5,clustered,colors='w')
+ax.set_title("Clustering Output (nclusters=%i)"%nclusters)
+plt.savefig(outfigpath+"Cluster_with_Shaded_uncertainties.png",dpi=200)
+
+
+#%% Try Iteratively Removing Based on Number of Points
+
+def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
+                returnall=False):
+    # Input: time x lat x lon
+    # Dependencies: 
+    #    numpy as np
+    
+    
+    # Remove All NaN Points
+    ntime,nlat,nlon = sla.shape
+    slars = sla.reshape(ntime,nlat*nlon)
+    okdata,knan,okpts = proc.find_nan(slars,0)
+    npts = okdata.shape[1]
+    
+    # ---------------------------------------------
+    # Calculate Correlation and Covariance Matrices
+    # ---------------------------------------------
+    srho = np.corrcoef(okdata.T,okdata.T)
+    scov = np.cov(okdata.T,okdata.T)
+    srho = srho[:npts,:npts]
+    scov = scov[:npts,:npts]
+    
+    # --------------------------
+    # Calculate Distance Matrix
+    # --------------------------
+    lonmesh,latmesh = np.meshgrid(lon,lat)
+    coords  = np.vstack([lonmesh.flatten(),latmesh.flatten()]).T
+    coords  = coords[okpts,:]
+    coords1 = coords.copy()
+    coords2 = np.zeros(coords1.shape)
+    coords2[:,0] = np.radians(coords1[:,1]) # First point is latitude
+    coords2[:,1] = np.radians(coords1[:,0]) # Second Point is Longitude
+    sdist = haversine_distances(coords2,coords2) * 6371
+    
+    # --------------------------
+    # Combine the Matrices
+    # --------------------------
+    a_fac = np.sqrt(-distthres/(2*np.log(0.5))) # Calcuate so exp=0.5 when distance is 3000km
+    expterm = np.exp(-sdist/(2*a_fac**2))
+    distance_matrix = 1-expterm*srho
+    
+    # --------------------------
+    # Do Clustering (scipy)
+    # --------------------------
+    cdist      = squareform(distance_matrix,checks=False)
+    linked     = linkage(cdist,'weighted')
+    clusterout = fcluster(linked, nclusters,criterion='maxclust')
+    
+    # -------------------------
+    # Calculate the uncertainty
+    # -------------------------
+    uncertout = np.zeros(clusterout.shape)
+    for i in range(len(clusterout)):
+        covpt     = scov[i,:]     # 
+        cid       = clusterout[i] #
+        covin     = covpt[np.where(clusterout==cid)]
+        covout    = covpt[np.where(clusterout!=cid)]
+        uncertout[i] = np.mean(covin)/np.mean(covout)
+
+    # Apply rules from Thompson and Merrifield
+    # if uncert > 2, set to 2
+    # if uncert <0.5, set to 0
+    uncertout[uncertout>2]   = 2
+    uncertout[uncertout<0.5] = 0 
+    
+    # -----------------------
+    # Replace into full array
+    # -----------------------
+    clustered = np.zeros(nlat5*nlon5)*np.nan
+    clustered[okpts] = clusterout
+    clustered = clustered.reshape(nlat5,nlon5)
+    cluster_count = []
+    for i in range(nclusters):
+        cid = i+1
+        cnt = (clustered==cid).sum()
+        cluster_count.append(cnt)
+        print("Found %i points in cluster %i" % (cnt,cid))
+    uncert = np.zeros(nlat5*nlon5)*np.nan
+    uncert[okpts] = uncertout
+    uncert = uncert.reshape(nlat5,nlon5)
+    
+    if returnall:
+        return clustered,uncert,cluster_count,srho,scov,sdist,distance_matrix
+    return clustered,uncert,cluster_count
+
+
+
+def plot_results(clustered,uncert,expname):
+    
+    # Set some defaults
+    ucolors = ('Blues','Purples','Greys','Blues','Reds','Oranges')
+    proj = ccrs.PlateCarree(central_longitude=180)
+    cm.get_cmap("jet",nclusters)
+    
+    fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    ax = add_coast_grid(ax)
+    gl = ax.gridlines(ccrs.PlateCarree(central_longitude=0),draw_labels=True,
+                  linewidth=2, color='gray', alpha=0.5, linestyle="dotted",lw=0.75)
+    gl.xlabels_top = False
+    gl.ylabels_right = False
+    pcm = ax.pcolormesh(lon5,lat5,clustered,cmap=cmap,transform=ccrs.PlateCarree())#,cmap='Accent')#@,cmap='Accent')
+    plt.colorbar(pcm,ax=ax,orientation='horizontal')
+    ax.set_title("Clustering Results \n nclusters=%i %s" % (nclusters,expname))
+    plt.savefig("%sCluster_results_n%i_%s.png"%(outfigpath,nclusters,expname),dpi=200,transparent=True)
+    
+    # Plot Cluster Uncertainty
+    fig1,ax1 = plt.subplots(1,1,subplot_kw={'projection':proj})
+    ax1 = add_coast_grid(ax1)
+    for i in range(nclusters):
+        cid = i+1
+        cuncert = uncert.copy()
+        cuncert[clustered!=cid] *= np.nan
+        ax1.pcolormesh(lon5,lat5,cuncert,vmin=0,vmax=2,cmap=ucolors[i],transform=ccrs.PlateCarree())
+        #fig.colorbar(pcm,ax=ax)
+    ax1.set_title("Clustering Output (nclusters=%i) %s "% (nclusters,expname))
+    plt.savefig(outfigpath+"Cluster_with_Shaded_uncertainties_%s.png" % expname,dpi=200)
+    return fig,ax,fig1,ax1
+    
+
+
+
+def elim_points(sla,lat,lon,nclusters,minpts,maxiter,distthres=3000):
+    
+    ntime,nlat,nlon = sla.shape
+    slain = sla.copy()
+    
+    # Preallocate
+    allclusters = []
+    alluncert   = []
+    allcount    = []
+    rempts      = np.zeros((nlat*nlon))*np.nan
+    
+    # Loop
+    flag = True
+    it   = 0
+    while flag or it < maxiter:
+        
+        expname = "iteration%02i" % it
+        print("Iteration %i ========================="%it)
+        
+        # Perform Clustering
+        clustered,uncert,cluster_count = cluster_ssh(slain,lat,lon,nclusters,distthres=distthres)
+        
+        # Visualize Results
+        fig,ax,fig1,ax1 = plot_results(clustered,uncert,expname)
+        
+        # Save results
+        allclusters.append(clustered)
+        alluncert.append(uncert)
+        allcount.append(cluster_count)
+        
+        # Check cluster counts
+        for i in range(nclusters):
+            cid = i+1
+            
+            flag = False
+            if cluster_count[i] < minpts:
+                flag = True # Set flag to continue running
+                print("\tCluster %i (count=%i) will be removed" % (cid,cluster_count[i]))
+                
+                clusteredrs = clustered.reshape(nlat*nlon)
+                slainrs = slain.reshape(ntime,nlat*nlon)
+                
+                
+                slainrs[:,clusteredrs==cid] = np.nan # Assign NaN Values
+                rempts[clusteredrs==cid] = it # Record iteration of removal
+                
+                slain = slainrs.reshape(ntime,nlat,nlon)
+        it += 1
+    
+    print("COMPLETE after %i iterations"%it)
+    rempts = rempts.reshape(nlat,nlon)
+    return allclusters,alluncert,allcount,rempts
+
+
+allclusters,alluncert,allcount,rempts = elim_points(sla_lp,lat5,lon5,6,20,5)
+
+
+            
+                
+        
+        
+        
+        
+        
+        
+        
+    
+    
+    
+    
+
+clustered1,uncert1,cluster_count1 = cluster_ssh(sla_lp,lat5,lon5,nclusters,distthres=3000)
+fig,ax,fig1,ax1 = plot_results(clustered,uncert,'test')
 
 #%%
 #%%
