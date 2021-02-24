@@ -823,7 +823,7 @@ def plot_results(clustered,uncert,expname):
     # Set some defaults
     ucolors = ('Blues','Purples','Greys','Blues','Reds','Oranges')
     proj = ccrs.PlateCarree(central_longitude=180)
-    cm.get_cmap("jet",nclusters)
+    cmap = cm.get_cmap("jet",nclusters)
     
     fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
     ax = add_coast_grid(ax)
@@ -868,7 +868,7 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,distthres=3000):
     it   = 0
     while flag or it < maxiter:
         
-        expname = "iteration%02i" % it
+        expname = "iteration%02i" % (it+1)
         print("Iteration %i ========================="%it)
         
         # Perform Clustering
@@ -906,9 +906,25 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,distthres=3000):
     return allclusters,alluncert,allcount,rempts
 
 
-allclusters,alluncert,allcount,rempts = elim_points(sla_lp,lat5,lon5,6,20,5)
+maxiter = 30
+allclusters,alluncert,allcount,rempts = elim_points(sla_lp,lat5,lon5,6,30,5)
 
 
+
+
+
+
+cmap2 = cm.get_cmap("jet",len(allcount)+1)
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':ccrs.PlateCarree(central_longitude=180)})
+ax = add_coast_grid(ax)
+pcm = ax.pcolormesh(lon5,lat5,rempts,cmap=cmap2,transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax)
+ax.set_title("Removed Points")
+plt.savefig(outfigpath+"RemovedPoints_by_Iteration.png",dpi=200)
+
+
+
+plt.pcolormesh(lon5,lat5,rempts)
             
                 
         
@@ -923,8 +939,8 @@ allclusters,alluncert,allcount,rempts = elim_points(sla_lp,lat5,lon5,6,20,5)
     
     
 
-clustered1,uncert1,cluster_count1 = cluster_ssh(sla_lp,lat5,lon5,nclusters,distthres=3000)
-fig,ax,fig1,ax1 = plot_results(clustered,uncert,'test')
+# clustered1,uncert1,cluster_count1 = cluster_ssh(sla_lp,lat5,lon5,nclusters,distthres=3000)
+# fig,ax,fig1,ax1 = plot_results(clustered,uncert,'test')
 
 #%%
 #%%
