@@ -108,8 +108,8 @@ if mconfig=="HTR":
 #%% Get NC files (RCP85)
 
 if mconfig=="R85":
-        ncstring = "b.e11.BRCP85C5CNBDRD.f09_g16.*.pop.h.SSH.*.nc"
-        ncount   = 40
+    ncstring = "b.e11.BRCP85C5CNBDRD.f09_g16.*.pop.h.SSH.*.nc"
+    ncount   = 40
     nclist = glob.glob(datpath+ncstring)
     nclist.sort()
     nclist = [fn for fn in nclist if "OIC" not in fn]
