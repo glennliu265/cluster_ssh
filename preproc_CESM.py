@@ -30,7 +30,7 @@ lon = ld['lon']
 #b.e11.BRCP85C5CNBDRD.f09_g16.001.pop.h.SSH.200601-208012.nc
 
 varkeep  = ['SSH','time','TLAT','TLONG'] 
-debug    = True
+debug    = False
 #%% Functions
 
 def preprocess(ds,varlist=varkeep):
