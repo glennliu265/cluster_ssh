@@ -165,5 +165,6 @@ if mconfig=="R85":
                 ds_regrid = xr.concat([ds_save,ds_regrid],dim='time')
                 concatflag = False
         
+        outname = outpath + "SSH_%s_ens%02d.nc" % (mconfig,e+1)
         ds_regrid.to_netcdf(outname,encoding={'SSH': {'zlib': True}})   
         e+=1
