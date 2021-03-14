@@ -41,13 +41,16 @@ import cartopy.feature as cfeature
 from pylab import cm
 
 
+from sklearn.metrics.pairwise import haversine_distances
+from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
+from scipy.spatial.distance import squareform
 
 #%% User Edits
 
 outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210309/"
 resmooth   = False
 debug      = True
-rem_gmsl   = True
+rem_gmsl   =False
 
 mons3      = ('Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec')
 #%% Functions
@@ -229,6 +232,7 @@ figpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/
 
 #%% 1) Load Data
 cmap = cmocean.cm.balance
+
 # Load Aviso Data
 sla,lon,lat,times = load_aviso(numpy=True)
 
@@ -240,7 +244,6 @@ mask = sla.sum(0)
 mask[~np.isnan(mask)] = 1
 
 t =0
-
 
 t=0
 fig,ax=plt.subplots(1,1)
@@ -287,7 +290,6 @@ tol  = 2.5
 deg  = 5
 sla_5deg,lat5,lon5 = coarsen_byavg(sla_filt,lat,lon,deg,tol)
 
-
 # Note ignoring nan leads to more coastal points
 #sla_5deg,lat5,lon5 = coarsen_byavg(sla_filt,lat,lon,deg,tol,latweight=False,ignorenan=True)
 
@@ -305,12 +307,6 @@ if debug:
 mask5 = sla_5deg.sum(0)
 mask5[~np.isnan(mask5)] = 1
 np.save(outpath+"AVISO_landice_mask_5deg.npy",mask5)
-
-#
-#%% Check for some zeros
-#
-
-
 
 #%% Extra: Remove some points
 
@@ -367,7 +363,7 @@ sla_5deg = sla_5deg[idstart:idend,:,:]
 timeslim = timesmon[idstart:idend]
 timesyr  = np.datetime_as_string(times,unit="Y")[idstart:idend]
 
-outname = "%sSSHA_AVISO_%sto%s.npz" % (datpath,start,end)
+outname = "%sSSHA_AVISO_%sto%s.npz" % (outpath,start,end)
 np.savez(outname,**{
     'sla_5deg':sla_5deg,
     'lon':lon5,
@@ -379,19 +375,37 @@ np.savez(outname,**{
 #
 #%% Remove GMSL
 #
+
 if rem_gmsl:
+    print("Removing GMSL")
     gmslrem = np.nanmean(sla_5deg,(1,2))
     sla_5deg_ori = sla_5deg.copy()
-    sla_5deg = sla_5deg - gmslrem[:,None,None]
+    sla_5deg     = sla_5deg - gmslrem[:,None,None]
     
     
-    fig,ax = plt.subplots(1,1)
-    ax.set_xticks(np.arange(0,240,12))
-    ax.set_xticklabels(timesyr[::12],rotation = 45)
-    ax.grid(True,ls='dotted')
+    if debug:
+        
+        # Test plot point
+        lonf = 330
+        latf = 40
+        klon,klat = proc.find_latlon(lonf,latf,lon5,lat5)
     
-    
-
+        fig,ax = plt.subplots(1,1)
+        ax.set_xticks(np.arange(0,240,12))
+        ax.set_xticklabels(timesyr[::12],rotation = 45)
+        ax.grid(True,ls='dotted')
+        
+        ax.plot(sla_5deg_ori[:,klat,klon],label="Original",color='k')
+        ax.plot(sla_5deg[:,klat,klon],label="Post-Removal")
+        ax.plot(gmslrem,label="GMSL")
+        ax
+        ax.legend()
+        ax.set_title("GMSL Removal at Lon %.2f Lat %.2f % (%s to %s)" % (lon5[klon],lat5[klat],start,end))
+        ax.set_ylabel()
+        plt.savefig(outfigpath+"GMSL_Removal_lon%i_lat%i.png"% (lonf,latf),dpi=200)
+        
+else:
+    print("GMSL Not Removed")
 
 #%% 4) Low Pass Filter
 
@@ -488,7 +502,7 @@ ax.legend()
 plt.savefig(outfigpath+"GMSL.png",dpi=200)
 
 
-outname = "%sSSHA_AVISO_%sto%s_LowPassFilter_order%i_cutoff%i.npz" % (datpath,start,end,order,tw)
+outname = "%sSSHA_AVISO_%sto%s_LowPassFilter_order%i_cutoff%i.npz" % (outpath,start,end,order,tw)
 np.savez(outname,**{
     'sla_lp':sla_lp,
     'lon':lon5,
@@ -753,8 +767,7 @@ plt.savefig("%sDistanceMatrixFinal_%s.png"%(outfigpath,locfn),dpi=200,transparen
 #%% Do Clustering!
 
 
-from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
-from scipy.spatial.distance import squareform
+
 
 nclusters = 6
 
