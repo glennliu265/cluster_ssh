@@ -33,6 +33,7 @@ import sys
 sys.path.append("/Users/gliu/Downloads/02_Research/01_Projects/01_AMV/00_Commons/03_Scripts/")
 from amv import proc,viz
 import yo_box as ybx
+import tbx
 from scipy.signal import butter, lfilter, freqz, filtfilt, detrend
 
 import cartopy.crs as ccrs
@@ -43,10 +44,10 @@ from pylab import cm
 
 #%% User Edits
 
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210224/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210309/"
 resmooth   = False
 debug      = True
-
+rem_gmsl   = True
 
 mons3      = ('Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec')
 #%% Functions
@@ -282,7 +283,7 @@ fig.colorbar(pcm,ax=ax)
 sla_filt = slasmooth * mask[None,:,:]
 
 # Apply Regridding (coarse averaging for now)
-tol  = 0.75
+tol  = 2.5
 deg  = 5
 sla_5deg,lat5,lon5 = coarsen_byavg(sla_filt,lat,lon,deg,tol)
 
@@ -296,7 +297,21 @@ if debug:
     fig,ax = plt.subplots(1,1)
     pcm = ax.pcolormesh(lon5,lat5,sla_5deg[0,:,:],cmap=cmap)
     fig.colorbar(pcm,ax=ax)
-    
+
+
+#
+# Save 5 degree mask
+#
+mask5 = sla_5deg.sum(0)
+mask5[~np.isnan(mask5)] = 1
+np.save(outpath+"AVISO_landice_mask_5deg.npy",mask5)
+
+#
+#%% Check for some zeros
+#
+
+
+
 #%% Extra: Remove some points
 
 # rempts = [[-35,40]]
@@ -332,6 +347,8 @@ if debug:
 # fig.colorbar(pcm,ax=ax,fraction=0.02)
 # ax.set_title("Points To Remove (Post Smoothing, After Removal)")
 # ax.set_extent(bbox)
+
+
 #%% Restrict to a time
 
 # Limit to particular period
@@ -350,18 +367,45 @@ sla_5deg = sla_5deg[idstart:idend,:,:]
 timeslim = timesmon[idstart:idend]
 timesyr  = np.datetime_as_string(times,unit="Y")[idstart:idend]
 
+outname = "%sSSHA_AVISO_%sto%s.npz" % (datpath,start,end)
+np.savez(outname,**{
+    'sla_5deg':sla_5deg,
+    'lon':lon5,
+    'lat':lat5,
+    'times':times
+    })
 
 
+#
+#%% Remove GMSL
+#
+if rem_gmsl:
+    gmslrem = np.nanmean(sla_5deg,(1,2))
+    sla_5deg_ori = sla_5deg.copy()
+    sla_5deg = sla_5deg - gmslrem[:,None,None]
     
+    
+    fig,ax = plt.subplots(1,1)
+    ax.set_xticks(np.arange(0,240,12))
+    ax.set_xticklabels(timesyr[::12],rotation = 45)
+    ax.grid(True,ls='dotted')
+    
+    
+
+
 #%% 4) Low Pass Filter
 
-order = 5
-tw    = 24 # filter size for time dim
+order = 4
+tw    = 15 # filter size for time dim
 
 def lp_butter(varmon,cutofftime,order):
-    
     # Input variable is assumed to be monthy with the following dimensions:
-    nmon,nlat,nlon = varmon.shape
+    flag1d=False
+    if len(varmon.shape) > 1:
+        nmon,nlat,nlon = varmon.shape
+    else:
+        flag1d = True
+        nmon = varmon.shape[0]
     
     # Design Butterworth Lowpass Filter
     filtfreq = nmon/cutofftime
@@ -370,16 +414,48 @@ def lp_butter(varmon,cutofftime,order):
     b,a    = butter(order,cutoff,btype="lowpass")
     
     # Reshape input
-    varmon = varmon.reshape(nmon,nlat*nlon)
-    
-    # Loop
-    varfilt = np.zeros((nmon,nlat*nlon)) * np.nan
-    for i in tqdm.tqdm(range(nlon*nlat)):
-        varfilt[:,i] = filtfilt(b,a,varmon[:,i])
-    
-    varfilt=varfilt.reshape(nmon,nlat,nlon)
+    if ~flag1d: # For 3d inputs, loop thru each point
+        varmon = varmon.reshape(nmon,nlat*nlon)
+        # Loop
+        varfilt = np.zeros((nmon,nlat*nlon)) * np.nan
+        for i in tqdm(range(nlon*nlat)):
+            varfilt[:,i] = filtfilt(b,a,varmon[:,i])
+        
+        varfilt=varfilt.reshape(nmon,nlat,nlon)
+    else: # 1d input
+        varfilt = filtfilt(b,a,varmon)
     return varfilt
 
+
+# Examine Low-Pass Filter
+dt = 24*3600*30
+M  = 5
+xtk = [1/(10*12*dt),1/(24*dt),1/(12*dt),1/(3*dt),1/dt]
+xtkl = ['decade','2-yr','year','season','month']
+# wn_test = np.random.normal(0,1,sla_5deg.shape)
+# wn_lp   = lp_butter(wn_test,tw,5)
+# wn_ts = wn_test[:,0,0]
+# wn_tslp = wn_lp[:,0,0]
+
+# X_unfilt,freq,[lower,upper]=tbx.bandavg_autospec(wn_ts,dt,M,.05)
+# X_filt,_,_=tbx.bandavg_autospec(wn_tslp,dt,M,0.05)
+# k24mon = np.argmin(np.abs(freq-xtk[1])) # Get index for 24 mon
+# p24 = np.real((X_filt/X_unfilt))[k24mon]
+
+# fig,ax=plt.subplots(1,1)
+# #ax.plot(freq,X_unfilt)
+# #ax.plot(freq,X_filt)
+# ax.plot(freq,X_filt/X_unfilt,label='Filtered/Unfiltered Spectrum',color='b')
+# ax.scatter(freq[k24mon],p24,marker="x")
+# ax.set_xscale('log')
+# ax.set_xticks(xtk)
+# ax.set_xticklabels(xtkl)
+# ax.set_title("%i-Band Averaged, Passing %f at 24 months"% (M,p24))
+# ax.legend()
+
+
+
+## RESUME: Actually perform low pass filter
 sla_lp = lp_butter(sla_5deg,tw,order)
 
 # Sample Plot
@@ -393,7 +469,7 @@ ax.legend()
 
 ntime,nlat5,nlon5 = sla_5deg.shape
 gmsl_smooth = np.nanmean(sla_5deg,(1,2))
-gmsl = np.nanmean(sla,(1,2))
+gmsl = np.nanmean(sla,(0,1))
 gmsl_lp = np.nanmean(sla_lp,(1,2))  
 
 
@@ -412,6 +488,13 @@ ax.legend()
 plt.savefig(outfigpath+"GMSL.png",dpi=200)
 
 
+outname = "%sSSHA_AVISO_%sto%s_LowPassFilter_order%i_cutoff%i.npz" % (datpath,start,end,order,tw)
+np.savez(outname,**{
+    'sla_lp':sla_lp,
+    'lon':lon5,
+    'lat':lat5,
+    'times':times
+    })
 #%% Explore seasonal cycle removal
 
 
@@ -469,7 +552,7 @@ ax.plot(slaptrm.squeeze(),label="Deseasonalized Data", color='b')
 # ax.scatter([])
 
 
-#%% 5) Calculate correlation matrix
+#%% 4.5) Remove NaN points and Examine Low pass filter
 
 slars = sla_lp.reshape(ntime,nlat5*nlon5)
 
@@ -477,6 +560,62 @@ slars = sla_lp.reshape(ntime,nlat5*nlon5)
 okdata,knan,okpts = proc.find_nan(slars,0)
 npts = okdata.shape[1]
 
+
+# Quick check low pass filter transfer function
+lpdata  = okdata.copy()
+rawdata = sla_5deg.reshape(ntime,nlat5*nlon5)[:,okpts]
+lpspec  = []
+rawspec = []
+npts5 = okdata.shape[1]
+for i in tqdm(range(npts5)):
+    X_spec,freq,_=tbx.bandavg_autospec(rawdata[:,i],dt,M,.05)
+    X_lpspec,_,_ =tbx.bandavg_autospec(lpdata[:,i],dt,M,.05)
+    lpspec.append(X_lpspec)
+    rawspec.append(X_spec)
+lpspec   = np.array(lpspec)
+rawspec  = np.array(rawspec)
+
+filtxfer = lpspec/rawspec
+
+k24mon = np.argmin(np.abs(freq-xtk[1])) # Get index for 24 mon
+if freq[k24mon] < xtk[1]: # less than 24 months
+    ids = [k24mon,k24mon+1]
+else:
+    ids = [k24mon-1,k24mon]
+p24 = np.zeros(npts5)
+for it in tqdm(range(npts5)):
+    p24[it] = np.interp(xtk[1],freq[ids],filtxfer[it,ids])
+    
+
+plotnum=npts5
+fig,axs= plt.subplots(2,1)
+ax = axs[0]
+ax.plot(freq,rawspec[:plotnum,:].T,label="",color='gray',alpha=0.25)
+ax.plot(freq,lpspec[:plotnum,:].T,label="",color='red',alpha=0.15)
+ax.set_xscale('log')
+ax.set_xticks(xtk)
+ax.set_xticklabels(xtkl)
+ax.set_title("Raw (gray) and Filtered (red) spectra")
+ax.grid(True,ls='dotted')
+
+ax = axs[1]
+plotp24 = np.interp(xtk[1],freq[ids],filtxfer[:plotnum,:].mean(0)[ids]) #p24[:plotnum].mean()
+ax.plot(freq,filtxfer[:plotnum,:].T,label="",color='b',alpha=0.05,zorder=-1)
+ax.plot(freq,filtxfer[:plotnum,:].mean(0),label="",color='k',alpha=1)
+ax.scatter(xtk[1],[plotp24],s=100,marker="x",color='k',zorder=1)
+ax.set_ylim([0,1])
+ax.set_xscale('log')
+ax.set_xticks(xtk)
+ax.set_xticklabels(xtkl)
+ax.set_title("Filter Transfer Function (Filtered/Raw), %.3f" % (plotp24*100) +"%  at 24 months")
+ax.grid(True,ls='dotted')
+plt.suptitle("AVISO 5deg SSH Timeseries, %i-Band Average"% (M))
+
+plt.tight_layout()
+plt.savefig("%sFilter_Transfer_%imonLP_%ibandavg_AVISO.png"%(outfigpath,tw,M),dpi=200)
+
+
+#%% 5) Calculate correlation matrix
 # Get map of correlation values
 srho = np.corrcoef(okdata.T,okdata.T)
 scov = np.cov(okdata.T,okdata.T)
@@ -921,9 +1060,6 @@ pcm = ax.pcolormesh(lon5,lat5,rempts,cmap=cmap2,transform=ccrs.PlateCarree())
 fig.colorbar(pcm,ax=ax)
 ax.set_title("Removed Points")
 plt.savefig(outfigpath+"RemovedPoints_by_Iteration.png",dpi=200)
-
-
-
 plt.pcolormesh(lon5,lat5,rempts)
             
                 
