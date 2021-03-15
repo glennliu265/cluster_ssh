@@ -121,11 +121,11 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
         covout    = covpt[np.where(clusterout!=cid)]
         uncertout[i] = np.mean(covin)/np.mean(covout)
 
-    # Apply rules from Thompson and Merrifield
+    # Apply rules from Thompson and Merrifield (Do this later)
     # if uncert > 2, set to 2
     # if uncert <0.5, set to 0
-    uncertout[uncertout>2]   = 2
-    uncertout[uncertout<0.5] = 0 
+    #uncertout[uncertout>2]   = 2
+    #uncertout[uncertout<0.5] = 0 
     
     # -----------------------
     # Replace into full array
@@ -167,6 +167,10 @@ def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath):
     plt.colorbar(pcm,ax=ax,orientation='horizontal')
     ax.set_title("Clustering Results \n nclusters=%i %s" % (nclusters,expname))
     plt.savefig("%sCluster_results_n%i_%s.png"%(outfigpath,nclusters,expname),dpi=200,transparent=True)
+    
+    # Apply Thompson and Merrifield thresholds
+    uncert[uncert>2] = 2
+    uncert[uncert<0.5]=0
     
     # Plot Cluster Uncertainty
     fig1,ax1 = plt.subplots(1,1,subplot_kw={'projection':proj})
