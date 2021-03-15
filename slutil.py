@@ -90,7 +90,7 @@ def remove_GMSL(ssh,lat,lon,times,tol=1e-10,viz=False,testpoint=[330,50]):
             klon,klat = proc.find_latlon(lonf,latf,lon,lat)
             
             fig,ax = plt.subplots(1,1)
-            ax.set_xticks(np.arange(0,240,12))
+            ax.set_xticks(np.arange(0,len(times)+1,12))
             ax.set_xticklabels(times[::12],rotation = 45)
             ax.grid(True,ls='dotted')
             
@@ -157,6 +157,7 @@ def lp_butter(varmon,cutofftime,order):
 # %% Visualization
 # -----------------
 
+
 def add_coast_grid(ax,bbox=[-180,180,-90,90],proj=None):
     """
     Add Coastlines, grid, and set extent for geoaxes
@@ -184,3 +185,97 @@ def add_coast_grid(ax,bbox=[-180,180,-90,90],proj=None):
     gl.xlabels_top = False
     gl.ylabels_right = False
     return ax
+
+def check_lpfilter(rawdata,lpdata,chkval,M,tw,dt=24*3600*30):
+    """
+    
+
+    Parameters
+    ----------
+    rawdata : ARRAY [time x space]
+        Raw Dataset (no NaNs)
+    lpdata : ARRAY [time x space]
+        Low-pass (LP) filtered dataset (no NaNs)
+    chkval : INT
+        Period (1/f) to check filter transfer function at (in units of dt)
+    M : INT
+        Bands to average over
+    tw : INT
+        Cutoff time low-pass filter was performed at (for plotting)
+    dt : INT, optional
+        Timestep size in seconds. The default is 24*3600*30.
+
+    Returns
+    -------
+    lpspec : ARRAY [freq x space]
+        Power spectra for LP filtered timeseries
+    rawspec : ARRAY [freq x space]
+        Power spectra for raw filtered timeseries
+    p24 : ARRAY [space]
+        Power spectra value for each point at chkval
+    filtxfer : ARRAY [freq x space]
+        Filter transfer function
+    fig : mpl figure
+    ax : mpl axes
+
+    """
+    # Set x-tick parameters
+    xtk = [1/(10*12*dt),1/(24*dt),1/(12*dt),1/(3*dt),1/dt]
+    xtkl = ['decade','2-yr','year','season','month']
+    
+    # Get number of points
+    npts5 = lpdata.shape[1]
+    
+    # Compute power spectra for each point
+    lpspec  = []
+    rawspec = []
+    for i in tqdm(range(npts5)):
+        X_spec,freq,_=tbx.bandavg_autospec(rawdata[:,i],dt,M,.05)
+        X_lpspec,_,_ =tbx.bandavg_autospec(lpdata[:,i],dt,M,.05)
+        lpspec.append(X_lpspec)
+        rawspec.append(X_spec)
+    lpspec   = np.real(np.array(lpspec))
+    rawspec  = np.real(np.array(rawspec))
+    
+    # Calculate filter transfer function
+    filtxfer = lpspec/rawspec
+    
+    # Get index for the frequency of interest [k24mon]
+    k24mon = np.argmin(np.abs(freq-chkval)) # Get index for 24 mon (chkval)
+    if freq[k24mon] < chkval: # less than 24 months
+        ids = [k24mon,k24mon+1]
+    else:
+        ids = [k24mon-1,k24mon]
+    
+    # Linearly interpolate to obtain value of spectrum at k24mon
+    p24 = np.zeros(npts5)
+    for it in tqdm(range(npts5)):
+        p24[it] = np.interp(chkval,freq[ids],filtxfer[it,ids])
+    
+    # Plot results
+    plotnum=npts5
+    fig,axs= plt.subplots(2,1)
+    ax = axs[0]
+    ax.plot(freq,rawspec[:plotnum,:].T,label="",color='gray',alpha=0.25)
+    ax.plot(freq,lpspec[:plotnum,:].T,label="",color='red',alpha=0.15)
+    ax.set_xscale('log')
+    ax.set_xticks(xtk)
+    ax.set_xticklabels(xtkl)
+    ax.set_title("Raw (gray) and Filtered (red) spectra")
+    ax.grid(True,ls='dotted')
+    
+    ax = axs[1]
+    plotp24 = p24.mean()#np.interp(chkval,freq[ids],filtxfer[:plotnum,:].mean(0)[ids]) #p24[:plotnum].mean()
+    ax.plot(freq,filtxfer[:plotnum,:].T,label="",color='b',alpha=0.05,zorder=-1)
+    ax.plot(freq,filtxfer[:plotnum,:].mean(0),label="",color='k',alpha=1)
+    ax.scatter(chkval,[plotp24],s=100,marker="x",color='k',zorder=1)
+    ax.set_ylim([0,1])
+    ax.set_xscale('log')
+    ax.set_xticks(xtk)
+    ax.set_xticklabels(xtkl)
+    ax.set_title("Filter Transfer Function (Filtered/Raw), %.3f" % (plotp24*100) +"%  Cutoff at " + "%i months" %(tw))
+    ax.grid(True,ls='dotted')
+    plt.suptitle("AVISO 5deg SSH Timeseries, %i-Band Average"% (M))
+    plt.tight_layout()
+    
+    return lpspec,rawspec,p24,filtxfer,fig,ax
