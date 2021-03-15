@@ -377,21 +377,18 @@ else:
 
 # print(" Max Difference is %e" % (np.nanmax(np.nanmax(ssha[:,:,:]-ssha2[:,:,:],0).flatten())) )
 
-
-
-
-
 # ----------------------
 #%% Design Low Pass Filter
 # ----------------------
 
-# Additional plotting options
+# ---
+# Apply LP Filter
+# ---
+# Filter Parameters and Additional plotting options
 dt   = 24*3600*30
 M    = 5
 xtk  = [1/(10*12*dt),1/(24*dt),1/(12*dt),1/(3*dt),1/dt]
 xtkl = ['decade','2-yr','year','season','month']
-
-# Filter Parameters
 order  = 5
 tw     = 15 # filter size for time dim
 sla_lp = slutil.lp_butter(ssha,tw,order)
@@ -399,7 +396,9 @@ sla_lp = slutil.lp_butter(ssha,tw,order)
 #% Remove NaN points and Examine Low pass filter
 slars = sla_lp.reshape(ntimer,nlat5*nlon5)
 
+# ---
 # Locate points where values are all zero
+# ---
 tsum     = slars.sum(0)
 zero_pts = np.where(tsum==0)[0]
 ptmap = np.array(tsum==0)
@@ -412,16 +411,19 @@ pcm = ax.pcolormesh(lon5,lat5,ptmap,cmap='bone',transform=ccrs.PlateCarree(),alp
 fig.colorbar(pcm,ax=ax)
 ax.set_title("Removed Zero Points")
 
-
+# ---
 # Visualize Filter Transfer Function
+# ---
 okdata,knan,okpts = proc.find_nan(slars,0)
 npts5 = okdata.shape[1]
 lpdata  = okdata.copy()
 rawdata = ssha.reshape(ntimer,nlat5*nlon5)[:,okpts]
-xtk     = [1/(10*12*dt),1/(24*dt),1/(12*dt),1/(3*dt),1/dt]
 lpspec,rawspec,p24,filtxfer,fig,ax=slutil.check_lpfilter(rawdata,lpdata,xtk[1],M,tw,dt=24*3600*30)
 plt.savefig("%sFilter_Transfer_%imonLP_%ibandavg_AVISO.png"%(outfigpath,tw,M),dpi=200)
 
+# ---
+# Save results
+# ---
 if savesteps: # Save low-pass-filtered result, right before clustering
     outname = "%sSSHA_LP_%s_order%i_cutoff%i.npz" % (datpath,datname,order,tw)
     print("Saved to: %s"%outname)
@@ -435,12 +437,20 @@ if savesteps: # Save low-pass-filtered result, right before clustering
 
 allclusters,alluncert,allcount,rempts = elim_points(sla_lp,lat5,lon5,nclusters,minpts,maxiter,outfigpath)
 
+np.savez("%s%s_Results.npz"%(datpath,expname),**{
+    'lon':lon5,
+    'lat':lat5,
+    'sla':sla_lp,
+    'clusters':allclusters,
+    'uncert':alluncert,
+    'count':allcount,
+    'rempts':rempts},allow_pickle=True)
+
 cmap2  = cm.get_cmap("jet",len(allcount)+1)
 fig,ax = plt.subplots(1,1,subplot_kw={'projection':ccrs.PlateCarree(central_longitude=180)})
 ax     = slutil.add_coast_grid(ax)
 pcm    = ax.pcolormesh(lon5,lat5,rempts,cmap=cmap2,transform=ccrs.PlateCarree())
 fig.colorbar(pcm,ax=ax)
 ax.set_title("Removed Points")
-plt.savefig(outfigpath+"RemovedPoints_by_Iteration.png",dpi=200)
+plt.savefig("%s%sRemovedPoints_by_Iteration.png" % (outfigpath,expname),dpi=200)
 plt.pcolormesh(lon5,lat5,rempts)
-
