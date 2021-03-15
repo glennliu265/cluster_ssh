@@ -16,6 +16,8 @@ import numpy as np
 import pygmt
 from tqdm import tqdm
 
+import os
+
 import glob
 import time
 import cmocean
@@ -419,7 +421,7 @@ npts5 = okdata.shape[1]
 lpdata  = okdata.copy()
 rawdata = ssha.reshape(ntimer,nlat5*nlon5)[:,okpts]
 lpspec,rawspec,p24,filtxfer,fig,ax=slutil.check_lpfilter(rawdata,lpdata,xtk[1],M,tw,dt=24*3600*30)
-plt.savefig("%sFilter_Transfer_%imonLP_%ibandavg_AVISO.png"%(outfigpath,tw,M),dpi=200)
+plt.savefig("%sFilter_Transfer_%imonLP_%ibandavg_%s.png"%(outfigpath,tw,M,expname),dpi=200)
 
 # ---
 # Save results
@@ -434,8 +436,14 @@ if savesteps: # Save low-pass-filtered result, right before clustering
         'times':times
         })
 #%% Perform Clustering
-
-allclusters,alluncert,allcount,rempts = elim_points(sla_lp,lat5,lon5,nclusters,minpts,maxiter,outfigpath)
+expdir = outfigpath+expname +"/"
+checkdir = os.path.isdir(expdir)
+if not checkdir:
+    print(expdir + " Not Found!")
+    os.makedirs(expdir)
+else:
+    print(expdir+" was found!")
+allclusters,alluncert,allcount,rempts = elim_points(sla_lp,lat5,lon5,nclusters,minpts,maxiter,expdir)
 
 np.savez("%s%s_Results.npz"%(datpath,expname),**{
     'lon':lon5,
