@@ -64,6 +64,15 @@ datname = "AVISO_%s_to_%s_remGMSL%i" % (start,end,rem_gmsl)
 expname = "%s_%iclusters_minpts%i_maxiters%i" % (datname,nclusters,minpts,maxiter)
 print(datname)
 print(expname)
+
+#Make Folders
+expdir = outfigpath+expname +"/"
+checkdir = os.path.isdir(expdir)
+if not checkdir:
+    print(expdir + " Not Found!")
+    os.makedirs(expdir)
+else:
+    print(expdir+" was found!")
 #%% Functions
 
 def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
@@ -166,6 +175,15 @@ def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath):
     ax.set_title("Clustering Results \n nclusters=%i %s" % (nclusters,expname))
     plt.savefig("%sCluster_results_n%i_%s.png"%(outfigpath,nclusters,expname),dpi=200,transparent=True)
     
+    
+    # Plot raw uncertainty
+    fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    ax     = slutil.add_coast_grid(ax)
+    pcm    = plt.pcolormesh(lon5,lat5,uncert,cmap='copper',transform=ccrs.PlateCarree())
+    ax.set_title(r"Uncertainty $(<\sigma^{2}_{out,x}>/<\sigma^{2}_{in,x}>)$")
+    fig.colorbar(pcm,ax=ax,fraction=0.02)
+    plt.savefig(outfigpath+"Uncertainty.png",dpi=200)
+    
     # Apply Thompson and Merrifield thresholds
     uncert[uncert>2] = 2
     uncert[uncert<0.5]=0
@@ -185,6 +203,9 @@ def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath):
         #fig.colorbar(pcm,ax=ax)
     ax1.set_title("Clustering Output (nclusters=%i) %s "% (nclusters,expname))
     plt.savefig(outfigpath+"Cluster_with_Shaded_uncertainties_%s.png" % expname,dpi=200)
+    
+    
+
     return fig,ax,fig1,ax1
     
 
@@ -288,9 +309,13 @@ if rem_gmsl:
     
     if len(out1)>2:
         ssha,gmslrem,fig,ax = out1
-        plt.savefig(outfigpath+"GMSL_Removal_AVISO_testpoint_lon%i_lat%i.png"%(lonf,latf),dpi=200)
+        plt.savefig(expdir+"GMSL_Removal_AVISO_testpoint_lon%i_lat%i.png"%(lonf,latf),dpi=200)
     else:
         ssha,gmsl=out1
+        
+    if np.all(np.abs(gmslrem)>(1e-10)):
+        print("Saving GMSL")
+        np.save(datpath+"AVISO_GMSL_%s_%s.npy"%(start,end),gmslrem)
 else:
     print("GMSL Not Removed")
     
@@ -337,7 +362,7 @@ npts5 = okdata.shape[1]
 lpdata  = okdata.copy()
 rawdata = ssha.reshape(ntimer,nlat5*nlon5)[:,okpts]
 lpspec,rawspec,p24,filtxfer,fig,ax=slutil.check_lpfilter(rawdata,lpdata,xtk[1],M,tw,dt=24*3600*30)
-plt.savefig("%sFilter_Transfer_%imonLP_%ibandavg_%s.png"%(outfigpath,tw,M,expname),dpi=200)
+plt.savefig("%sFilter_Transfer_%imonLP_%ibandavg_%s.png"%(expdir,tw,M,expname),dpi=200)
 
 # ---
 # Save results
@@ -352,15 +377,7 @@ if savesteps: # Save low-pass-filtered result, right before clustering
         'times':times
         })
 #%% Perform Clustering
-import os
 
-expdir = outfigpath+expname +"/"
-checkdir = os.path.isdir(expdir)
-if not checkdir:
-    print(expdir + " Not Found!")
-    os.makedirs(expdir)
-else:
-    print(expdir+" was found!")
 allclusters,alluncert,allcount,rempts = elim_points(sla_lp,lat5,lon5,nclusters,minpts,maxiter,expdir)
 
 np.savez("%s%s_Results.npz"%(datpath,expname),**{
@@ -378,5 +395,5 @@ ax     = slutil.add_coast_grid(ax)
 pcm    = ax.pcolormesh(lon5,lat5,rempts,cmap=cmap2,transform=ccrs.PlateCarree())
 fig.colorbar(pcm,ax=ax)
 ax.set_title("Removed Points")
-plt.savefig("%s%sRemovedPoints_by_Iteration.png" % (outfigpath,expname),dpi=200)
+plt.savefig("%sRemovedPoints_by_Iteration.png" % (expdir),dpi=200)
 plt.pcolormesh(lon5,lat5,rempts)
