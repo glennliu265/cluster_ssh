@@ -90,7 +90,8 @@ def remove_GMSL(ssh,lat,lon,times,tol=1e-10,viz=False,testpoint=[330,50]):
             klon,klat = proc.find_latlon(lonf,latf,lon,lat)
             
             fig,ax = plt.subplots(1,1)
-            ax.set_xticks(np.arange(0,len(times)+1,12))
+            #ax.set_xticks(np.arange(0,len(times)+1,12))
+            ax.set_xticks(np.arange(0,len(times),12))
             ax.set_xticklabels(times[::12],rotation = 45)
             ax.grid(True,ls='dotted')
             
@@ -153,6 +154,109 @@ def lp_butter(varmon,cutofftime,order):
     return varfilt
 
 
+# -------------
+# %% Clustering
+# -------------
+
+def calc_matrices(invar,lon,lat,return_all=False):
+    """
+    Calculate correlation, covariance, and distance matrices in preparation
+    for clustering.
+
+    Parameters
+    ----------
+    invar : ARRAY (Time x Lat x Lon)
+        Input variable
+    lon : ARRAY (Lon)
+        Longitudes
+    lat : ARRAY (Lat)
+        Latitudes
+    return_all : BOOL, optional
+        Set to true to return non-nan points, indices, and coordinates. The default is False.
+
+    Returns
+    -------
+    srho: ARRAY [npts x npts]
+        Correlation Matrix
+    scov: ARRAY [npts x npts]
+        Covariance Matrix
+    sdist: ARRAY [npts x npts]
+        Distance Matrix
+
+    """
+    
+    # ---------------------
+    # Remove All NaN Points
+    # ---------------------
+    ntime,nlat,nlon = invar.shape
+    varrs = invar.reshape(ntime,nlat*nlon)
+    okdata,knan,okpts = proc.find_nan(varrs,0)
+    npts = okdata.shape[1]
+    
+    # ---------------------------------------------
+    # Calculate Correlation and Covariance Matrices
+    # ---------------------------------------------
+    srho = np.corrcoef(okdata.T,okdata.T)
+    scov = np.cov(okdata.T,okdata.T)
+    srho = srho[:npts,:npts]
+    scov = scov[:npts,:npts]
+    
+    # --------------------------
+    # Calculate Distance Matrix
+    # --------------------------
+    lonmesh,latmesh = np.meshgrid(lon,lat)
+    coords  = np.vstack([lonmesh.flatten(),latmesh.flatten()]).T
+    coords  = coords[okpts,:]
+    coords1 = coords.copy()
+    coords2 = np.zeros(coords1.shape)
+    coords2[:,0] = np.radians(coords1[:,1]) # First point is latitude
+    coords2[:,1] = np.radians(coords1[:,0]) # Second Point is Longitude
+    sdist = haversine_distances(coords2,coords2) * 6371
+    
+    if return_all:
+        return srho,scov,sdist,okdata,okpts,coords2
+    return srho,scov,sdist
+    
+def make_distmat(srho,sdist,distthres=3000,rhowgt=1,distwgt=1):
+    """
+    Make distance matrix, using output from calc_matrices
+    
+    dist = 1 - exp(-dist/(2a^2)) * corr
+
+    Parameters
+    ----------
+    srho : ARRAY [npts x npts]
+        DESCRIPTION.
+    sdist : ARRAY [npts x npts]
+        DESCRIPTION.
+    distthres : INT, optional
+        Point at which exponential term is 0.5. The default is 3000.
+    rhowgt : FLOAT, optional
+        Amount to weight the correlation matrix. The default is 1.
+    distwgt : TYPE, optional
+        Amount to weight the exponential (distance) term. The default is 1.
+
+    Returns
+    -------
+    distance_matrix : ARRAY [npts x npts]
+        Distance matrix for input to the clustering algorithm
+
+    """
+    
+    # Calculate exponential term
+    a_fac = np.sqrt(-distthres/(2*np.log(0.5))) # Calcuate so exp=0.5 when distance is distthres
+    expterm = np.exp(-sdist/(2*a_fac**2))
+    
+    # Apply weighting to distance and correlation matrix
+    # So that as wgt --> 0, value --> 1
+    # and as wgt --> 1, value --> itself
+    #expterm *= (expterm-1)*distwgt + 1
+    #srho    *= ((np.abs(srho)-1)*rhowgt + 1)  * np.sign(srho)
+    
+    # Calculate 
+    distance_matrix = 1-expterm*srho
+    
+    return distance_matrix
 # -----------------
 # %% Visualization
 # -----------------
