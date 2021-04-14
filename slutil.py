@@ -286,8 +286,8 @@ def add_coast_grid(ax,bbox=[-180,180,-90,90],proj=None):
     ax.set_extent(bbox)
     gl = ax.gridlines(crs=proj, draw_labels=True,
                   linewidth=2, color='gray', alpha=0.5, linestyle="dotted",lw=0.75)
-    gl.xlabels_top = False
-    gl.ylabels_right = False
+    gl.right_labels = False
+    gl.top_labels = False
     return ax
 
 def check_lpfilter(rawdata,lpdata,chkval,M,tw,dt=24*3600*30):

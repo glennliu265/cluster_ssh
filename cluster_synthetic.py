@@ -80,41 +80,37 @@ else:
 #%% Functions
 
 def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
-                returnall=False):
+                returnall=False,absmode=0,distmode=0,uncertmode=0):
     
-    
-    # Remove All NaN Points
+    # ---------------------------------------------
+    # Calculate Correlation, Covariance, and Distance Matrices
+    # ---------------------------------------------
     ntime,nlat,nlon = sla.shape
-    slars = sla.reshape(ntime,nlat*nlon)
-    okdata,knan,okpts = proc.find_nan(slars,0)
-    npts = okdata.shape[1]
+    srho,scov,sdist,okdata,okpts,coords2=slutil.calc_matrices(sla,lon5,lat5,return_all=True)
+    #npts = okdata.shape[1]
     
-    # ---------------------------------------------
-    # Calculate Correlation and Covariance Matrices
-    # ---------------------------------------------
-    srho = np.corrcoef(okdata.T,okdata.T)
-    scov = np.cov(okdata.T,okdata.T)
-    srho = srho[:npts,:npts]
-    scov = scov[:npts,:npts]
-    
-    # --------------------------
-    # Calculate Distance Matrix
-    # --------------------------
-    lonmesh,latmesh = np.meshgrid(lon,lat)
-    coords  = np.vstack([lonmesh.flatten(),latmesh.flatten()]).T
-    coords  = coords[okpts,:]
-    coords1 = coords.copy()
-    coords2 = np.zeros(coords1.shape)
-    coords2[:,0] = np.radians(coords1[:,1]) # First point is latitude
-    coords2[:,1] = np.radians(coords1[:,0]) # Second Point is Longitude
-    sdist = haversine_distances(coords2,coords2) * 6371
+    # -------------------------------
+    # Apply corrections based on mode
+    # -------------------------------
+    if absmode == 1: # Take Absolute Value of Correlation/Covariance
+        scov = np.abs(scov)
+        srho = np.abs(srho)
+    elif absmode == 2: # Use Anticorrelation, etc
+        scov *= -1
+        srho *= -1
     
     # --------------------------
     # Combine the Matrices
     # --------------------------
     a_fac = np.sqrt(-distthres/(2*np.log(0.5))) # Calcuate so exp=0.5 when distance is 3000km
     expterm = np.exp(-sdist/(2*a_fac**2))
-    distance_matrix = 1-expterm*srho
+    
+    if distmode == 0: # Include distance and correlation
+        distance_matrix = 1-expterm*srho
+    elif distmode == 1: # Just Include distance
+        distance_matrix = 1-expterm
+    elif distmode == 2: # Just Include correlation
+        distance_matrix = 1-srho
     
     # --------------------------
     # Do Clustering (scipy)
@@ -132,13 +128,31 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
         cid       = clusterout[i] #
         covin     = covpt[np.where(clusterout==cid)]
         covout    = covpt[np.where(clusterout!=cid)]
-        uncertout[i] = np.mean(covin)/np.mean(covout)
+        
+        if uncertmode == 0:
+            uncertout[i] = np.mean(covin)/np.mean(covout)
+        elif uncertmode == 1:
+            uncertout[i] = np.median(covin)/np.median(covout)
 
     # Apply rules from Thompson and Merrifield (Do this later)
     # if uncert > 2, set to 2
     # if uncert <0.5, set to 0
     #uncertout[uncertout>2]   = 2
     #uncertout[uncertout<0.5] = 0 
+    
+    # ------------------------------
+    # Calculate Wk for gap statistic
+    # ------------------------------
+    Wk = np.zeros(nclusters)
+    for i in range(nclusters):
+        
+        cid = i+1
+        ids = np.where(clusterout==cid)[0]
+        dist_in = distance_matrix[ids[:,None],ids[None,:]] # Get Pairwise Distances within cluster
+        dist_in = dist_in.sum()/2 # Sum and divide by 2 (since pairs are replicated)
+        
+        Wk[i] = dist_in
+    
     
     # -----------------------
     # Replace into full array
@@ -157,8 +171,8 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
     uncert = uncert.reshape(nlat,nlon)
     
     if returnall:
-        return clustered,uncert,cluster_count,srho,scov,sdist,distance_matrix
-    return clustered,uncert,cluster_count
+        return clustered,uncert,cluster_count,Wk,srho,scov,sdist,distance_matrix
+    return clustered,uncert,cluster_count,Wk
 
 
 
@@ -222,7 +236,8 @@ def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath,title=None):
     return fig,ax,fig1,ax1
     
 
-def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000):
+def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
+                absmode=0,distmode=0,uncertmode=0):
     
     ntime,nlat,nlon = sla.shape
     slain = sla.copy()
@@ -231,6 +246,7 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000):
     allclusters = []
     alluncert   = []
     allcount    = []
+    allWk = []
     rempts      = np.zeros((nlat*nlon))*np.nan
     
     # Loop
@@ -242,12 +258,14 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000):
         print("Iteration %i ========================="%it)
         
         # Perform Clustering
-        clustered,uncert,cluster_count = cluster_ssh(slain,lat,lon,nclusters,distthres=distthres)
+        clustered,uncert,cluster_count,Wk = cluster_ssh(slain,lat,lon,nclusters,distthres=distthres,
+                                                     absmode=absmode,distmode=distmode,uncertmode=uncertmode)
         
         # Save results
         allclusters.append(clustered)
         alluncert.append(uncert)
         allcount.append(cluster_count)
+        allWk.append(Wk)
         
         # Visualize Results
         fig,ax,fig1,ax1 = plot_results(clustered,uncert,expname,lat,lon,outfigpath)
@@ -275,7 +293,7 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000):
     
     print("COMPLETE after %i iterations"%it)
     rempts = rempts.reshape(nlat,nlon)
-    return allclusters,alluncert,allcount,rempts
+    return allclusters,alluncert,allcount,rempts,allWk
 
 
 #%%
@@ -483,4 +501,245 @@ expname += "_distmode%i_uncertmode_%i_absmode%i" % (distmode,uncertmode,absmode)
 outfigpath = expdir
 plot_results(clustered,uncert,expname,lat5,lon5,outfigpath,title=title)
 
-#allclusters,alluncert,allcount,rempts = elim_points(wnstd,lat5,lon5,nclusters,minpts,maxiter,expdir)
+# -------------------------------------------------------------
+#%%   Calculate Clusters for particular experiments, for AVISO
+# -------------------------------------------------------------
+
+varin=sla_lp.copy()
+absmode    =0
+distmode   =0
+uncertmode =0
+
+expname = "Synthetic_%iclusters_minpts%i_maxiters%i" % (nclusters,minpts,maxiter)
+expname += "_distmode%i_uncertmode_%i_absmode%i" % (distmode,uncertmode,absmode)
+print(datname)
+print(expname)
+
+#Make Folders
+expdir = outfigpath+expname +"/"
+checkdir = os.path.isdir(expdir)
+if not checkdir:
+    print(expdir + " Not Found!")
+    os.makedirs(expdir)
+else:
+    print(expdir+" was found!")
+
+allclusters,alluncert,allcount,rempts,allWk = elim_points(varin,lat5,lon5,nclusters,minpts,maxiter,expdir,
+                                                    absmode=absmode,distmode=distmode,uncertmode=uncertmode)
+
+
+#
+#%% Test Number of clusters
+#
+varin=sla_lp.copy()
+absmode    =0
+distmode   =0
+uncertmode =0
+nclustall = np.arange(1,31)
+
+Wkall = []
+Wknulls = []
+clusters = []
+cnull = []
+for i in nclustall:
+    clustered,uncert,cluster_count,Wk = cluster_ssh(varin,lat5,lon5,i,distthres=3000,
+                                                         absmode=absmode,distmode=distmode,uncertmode=uncertmode)
+    
+    clusterednull,uncert,cluster_count,Wknull = cluster_ssh(wn,lat5,lon5,i,distthres=3000,
+                                                         absmode=absmode,distmode=distmode,uncertmode=uncertmode)
+    
+    
+    clusters.append(clusters)
+    Wkall.append(Wk.mean())
+    cnull.append(clusterednull)
+    Wknulls.append(Wknull.mean())
+
+
+Wkall = np.array(Wkall)
+Wknulls = np.array(Wknulls)
+
+
+fig,ax = plt.subplots(1,1)
+# ax.plot(nclustall,Wkall/Wkall.max(),label="AVISO",color='r')
+# ax.scatter(nclustall,Wkall/Wkall.max(),label="",color='r')
+
+# ax.plot(nclustall,Wknulls/Wknulls.max(),label="White Noise, Distance Only(Null)",color='k')
+# ax.scatter(nclustall,Wknulls/Wknulls.max(),label="",color='k')
+
+ax.plot(nclustall,Wkall,label="AVISO",color='r')
+ax.scatter(nclustall,Wkall,label="",color='r')
+
+ax.plot(nclustall,Wknulls,label="White Noise, Distance Only(Null)",color='k')
+ax.scatter(nclustall,Wknulls,label="",color='k')
+
+
+ax.set_ylabel("Within Cluster Distance (km)")
+ax.set_xlabel("Number of Clusters")
+ax.set_xticks(nclustall[::2])
+ax.legend()
+    
+#%% Examine typical distance and time decay scales
+
+varin      = sla_lp
+ntime,nlat,nlon = varin.shape
+srho,scov,sdist,okdata,okpts,coords2=slutil.calc_matrices(varin,lon5,lat5,return_all=True)
+
+i = 222
+
+# Get Sorted Matrices
+sortsrho  = np.zeros(srho.shape)
+sortsdist = np.zeros(srho.shape)
+sortidall = np.zeros(srho.shape)
+npts = srho.shape[0]
+for i in tqdm(range(npts)):
+    
+    # Get data for point
+    distpt = sdist[i,:]
+    rhopt  = srho[i,:]
+    
+    # Sort
+    sortid = np.argsort(distpt)#Indices sorting by distance
+    sortrho = rhopt[sortid] 
+    sortdist = distpt[sortid]
+    
+    # Save
+    sortsrho[i,:] = sortrho.copy()
+    sortsdist[i,:] = sortdist.copy()
+    sortidall[i,:] = sortid.copy()
+
+
+
+
+i = 222
+
+distpt = sortsdist[i,:]
+rhopt = sortsrho[i,:]
+
+
+
+
+E = np.ones((npts,2))
+E[:,1] = -distpt
+A = np.log(rhopt)
+A = A[:,None]
+
+import scipy
+hey =scipy.optimize.curve_fit(lambda t,a,b: a*np.exp(-b*t),  distpt,  rhopt)
+
+
+def model_func(t, A, K, C):
+    return A * np.exp(K * t) + C
+
+def fit_exp_linear(t, y, C=0):
+    y = y - C
+    y = np.log(y)
+    K, A_log = np.polyfit(t, y, 1)
+    A = np.exp(A_log)
+    return A, K
+
+
+testa = rhopt.copy()
+testa[testa<=0] = 1e-15
+test = fit_exp_linear(distpt,testa)
+
+fig,ax = plt.subplots(1,1)
+ax.scatter(distpt,rhopt,20,color='k',alpha=0.8)
+ax.set_title("Distance vs Correlation for Pt %i"%i)
+ax.set_xlabel("Distance")
+ax.set_ylabel("Correlation")
+ax.axhline([0],ls='dashed',color='gray',lw=0.75)
+labexp = "$%.3fe^{-%.3fd}$" % (test[0],test[1])
+ax.plot(distpt,model_func(distpt,test[0],test[1],0),color='r',label=labexp)
+ax.legend()
+plt.savefig("%s../ExpFit.png"%outfigpath,dpi=200)
+
+
+# --------------------------------
+# Combine nearby values and average
+dists1  = []#[[]]
+counts1 = []#np.zeros((npts))
+rhos1   = []#np.zeros((npts))
+cnt = -1
+dist0 = 999
+tol=1
+for i in tqdm(range(npts)):
+    print(i)
+    # Get Distance
+    dist  = distpt[i]
+    # Update i, depending on if distance is same
+    if ~((dist < dist0+tol) and (dist > dist0-tol)):
+        dists1.append(dist)
+        rhos1.append(rhopt[i])
+        counts1.append(1)
+        cnt += 1
+    else:
+        # Add to the point
+        dists1[cnt]  += dist
+        rhos1[cnt]   += rhopt[i]
+        counts1[cnt] += 1
+    dist0 = dist
+distfin = np.array(dists1)/np.array(counts1)
+rhofin = np.array(rhos1)/np.array(counts1)
+# ----------------------------------------
+
+# Sort linear indices
+fsdist = sortsdist.flatten()
+fsid   = np.argsort(fsdist)
+
+fsdistsort  =fsdist[fsid]
+fsrhosort = sortsrho.flatten()[fsid]
+
+distnew = []
+rhonew  = []
+
+# Calculate characterstic timescales by fitting an exponential function
+plt.plot(fsrhosort), plt.xlim([0, 3000])
+
+#%% Calculate characteristic timescale of decay
+
+# Remove NaNs
+invar = ssha.copy()
+invar = invar.reshape(ntime,nlat5*nlon5)
+okdata,knan,okpts = proc.find_nan(invar,dim=0)
+
+npts = invar.shape[1]
+nok = okdata.shape[1]
+
+# Compute Lag 1 AR for each and effective DOF
+ar1  = np.zeros(nok)
+neff = np.zeros(nok) 
+for i in tqdm(range(nok)):
+    
+    ts = okdata[:,i]
+    r = np.corrcoef(ts[1:],ts[:-1])[0,1]
+    ar1[i] = r
+    neff[i] = ntime*(1-r)/(1+r)
+
+# Replace into domain
+ar1_map = np.zeros(npts)*np.nan
+neff_map = np.zeros(npts)*np.nan
+ar1_map[okpts] = ar1
+neff_map[okpts] = neff
+ar1_map = ar1_map.reshape(nlat5,nlon5)
+neff_map = neff_map.reshape(nlat5,nlon5)
+
+#%% Visualize some plots
+
+
+
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':ccrs.PlateCarree()})
+ax = slutil.add_coast_grid(ax)
+pcm = ax.pcolormesh(lon5,lat5,ar1_map,cmap="magma")
+ax.set_title("Lag 1 Autocorrelation, AVISO (1993-2013)")
+fig.colorbar(pcm,ax=ax,fraction=0.046)
+plt.savefig("%s../AR1_noLP_Map.png"%outfigpath,dpi=200)
+
+
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':ccrs.PlateCarree()})
+ax = slutil.add_coast_grid(ax)
+pcm = ax.pcolormesh(lon5,lat5,neff_map,vmin=0,vmax=240,cmap="Purples")
+ax.set_title("Effective Degrees of Freedom, AVISO (1993-2013)")
+fig.colorbar(pcm,ax=ax,fraction=0.046)
+plt.savefig("%s../Neff_Map_noLP.png"%outfigpath,dpi=200)
+
+
