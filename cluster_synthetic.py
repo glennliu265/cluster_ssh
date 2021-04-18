@@ -31,7 +31,7 @@ import cartopy.feature as cfeature
 from pylab import cm
 from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
 from scipy.spatial.distance import squareform
-
+from scipy import stats
 # Custom Toolboxes
 import sys
 sys.path.append("/Users/gliu/Downloads/02_Research/01_Projects/01_AMV/00_Commons/03_Scripts/")
@@ -53,7 +53,8 @@ end         = '2013-01'
 #start      = '1850-01'
 #end        = '2100-12'
 nclusters   = 6
-rem_gmsl    = False
+rem_gmsl    = True
+rem_seas    = True
 maxiter     = 5  # Number of iterations for elimiting points
 minpts      = 30 # Minimum points per cluster
 
@@ -68,7 +69,8 @@ print(datname)
 print(expname)
 
 #Make Folders
-expdir = outfigpath+expname +"/"
+#expdir = outfigpath+expname +"/"
+expdir = outfigpath+"../20210414/"
 checkdir = os.path.isdir(expdir)
 if not checkdir:
     print(expdir + " Not Found!")
@@ -351,6 +353,133 @@ else:
     print("GMSL Not Removed")
     
 
+# ---------------------
+#%% Remove Seasonal Cycle
+# ---------------------
+if rem_seas:
+    
+    # Copy and reshape data
+    sshc = ssha.copy()
+    ntime = sshc.shape[0]
+    sshc = sshc.reshape(ntime,nlat5*nlon5)
+    
+    # Get non nan points
+    okdata,knan,okpts = proc.find_nan(sshc,0)
+    
+    # Remove seasonal cycle
+    x,E = proc.remove_ss_sinusoid(okdata,semiannual=True)
+    ssh_ss  = E@x
+    okdata_ds = okdata - ssh_ss
+    
+    # Replace into data
+    sshnew = np.zeros(sshc.shape)*np.nan
+    sshnew[:,okpts] = okdata_ds
+    sshnew = sshnew.reshape(ntime,nlat5,nlon5)
+    
+    sshss = np.zeros(sshc.shape)*np.nan
+    sshss[:,okpts] = ssh_ss
+    sshss = sshss.reshape(ntime,nlat5,nlon5)
+    
+    # Try another removal method
+    ssha2 = ssha.copy()
+    clim,ssha2 = proc.calc_clim(ssha2,0,returnts=1)
+    ssha2 = ssha2 - clim[None,:,:,:]
+    ssha2 = ssha2.reshape(ssha2.shape[0]*12,nlat5,nlon5)
+    #ssha2 = ssha2.reshape(int(ntime/12)
+    
+    # Plot sample removal
+    plotmons=60
+    #klonss,klatss = proc.find_latlon(325,5,lon5,lat5)
+    klonss,klatss = proc.find_latlon(330,50,lon5,lat5)
+    fig,axs = plt.subplots(2,1)
+    
+    ax=axs[0]
+    ax.plot(ssha[:plotmons,klatss,klonss],color='gray',label="Original")
+    ax.plot(sshnew[:plotmons,klatss,klonss],color='k',label="Deseasoned (Sinusoid)")
+    ax.plot(sshss[:plotmons,klatss,klonss],color='red',ls='dotted',label="Sinusoid Fit")
+    ax.legend(ncol=3,fontsize=8)
+    ax.grid(True,ls='dotted')
+    ax.set_ylim([-.2,.2])
+    ax.set_ylabel("SSH (cm)")
+    
+    ax = axs[1]
+    ax.plot(ssha[:plotmons,klatss,klonss],color='gray',label="Original")
+    ax.plot(ssha2[:plotmons,klatss,klonss],color='k',label="Deseasoned (Mean Cycle)")
+    ax.plot(np.tile(clim[:,klatss,klonss],int(plotmons/12)),color='blue',ls='dotted',label="Mean Cycle")
+    ax.legend(ncol=3,fontsize=8)
+    ax.grid(True,ls='dotted')
+    ax.set_ylim([-.2,.2])
+    ax.set_xlabel("Months")
+    ax.set_ylabel("SSH (cm)")
+    
+    plt.suptitle("Seasonal Cycle Removal at Lon %i Lat %i"%(lon5[klonss],lat5[klatss]))
+    plt.savefig("%sSSRemoval_lon%i_lat%i.png"%(expdir,lon5[klonss],lat5[klatss]),dpi=150)
+
+    ssha = ssha2.copy()
+
+
+#
+#%% Calculate some characteristic timescales
+#
+nlags = 60
+
+# Again reshape
+ssh3 = ssha.copy()
+ssh3 = ssh3.reshape(ntime,nlat5*nlon5)
+okdata,knan,okpts = proc.find_nan(ssh3,0)
+
+# Calculate Lag Autocorrelation
+lagac = np.zeros((nlags,okdata.shape[1]))
+for l in range(nlags):
+    lagac[l,:] = proc.pearsonr_2d(okdata[:ntime-l,:],okdata[l:,:],0)
+sshac = np.zeros((nlags,nlat5*nlon5))
+sshac[:,okpts] = lagac
+sshac = sshac.reshape(nlags,nlat5,nlon5)
+
+
+
+# Test Plot
+klonss,klatss = proc.find_latlon(330,50,lon5,lat5)
+r = sshac[1,klatss,klonss]
+n_eff = int((ntime-nlags)*(1-r)/(1+r))
+p = 0.05
+tails = 2
+ptilde    = p/tails
+critval   = stats.t.ppf(1-ptilde,n_eff)
+corrthres = np.sqrt(1/ ((n_eff/np.power(critval,2))+1))
+
+fig,ax = plt.subplots(1,1)
+ax.scatter(np.arange(0,nlags,1),sshac[:,klatss,klonss],20,color='r',marker="o")
+ax.plot(sshac[:,klatss,klonss],color='r',label="ACF")
+ax.set_title("Estimating Decay Timescale at Lon %i Lat %i"%(lon5[klonss],lat5[klatss]))
+ax.set_ylabel("Correlation")
+ax.set_xlabel("Lag (Months)")
+ax.axhline(1/np.exp(1),label="1/e",ls='dashed',color='k')
+ax.axhline(corrthres,label="2-Tailed T-Test (DOF=%i), r=%.2f"%(n_eff,corrthres),ls='dashed',color='b')
+ax.legend()
+ax.grid(True,ls='dotted')
+ax.set_xticks(np.arange(0,nlags+6,6))
+plt.savefig("%sTimescale_lon%i_lat%i.png"%(expdir,lon5[klonss],lat5[klatss]),dpi=150)
+
+
+
+# Find Nearest Month
+msk = ssha.copy()
+msk = msk.sum(0)
+msk[~np.isnan(msk)] = 1
+tau = sshac.copy()
+tau = np.argmin(np.abs(tau-1/np.exp(1)),0)
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':ccrs.PlateCarree()})
+ax = slutil.add_coast_grid(ax)
+pcm = ax.pcolormesh(lon5,lat5,tau*msk,cmap='Blues')
+fig.colorbar(pcm,ax=ax)
+plt.savefig("%sTimescale_efold.png"%(expdir),dpi=150)
+
+
+
+
+
+
 
 # ----------------------
 #%% Design Low Pass Filter
@@ -412,6 +541,10 @@ aviso_std = sla_lp.std(0)
 wnstd = wn.copy()
 wnstd *= aviso_std[None,:,:]
 
+# Low Pass Filter The Timeseries
+wnlp = slutil.lp_butter(wnstd,tw,order)
+
+
 # Add a trend
 #%% Do some clustering, with some experiments
 
@@ -430,8 +563,9 @@ wnstd *= aviso_std[None,:,:]
 # 1: Absolute Values: Take abs(corr) and abs(cov)
 # 2: Anti: Take -1*corr, -1*cov
 
-varin      = sla_lp
-snamelong  = "AVISO (Distance and Correlation, nclusters=%i)" % nclusters
+varin      = wnstd
+snamelong  = "White Noise (Unfiltered)"
+expname    = "AVISO_WhiteNoise_nclusters%i_" % (nclusters)
 distmode   = 0
 absmode    = 0
 uncertmode = 0
@@ -496,7 +630,6 @@ uncert[okpts] = uncertout
 uncert = uncert.reshape(nlat,nlon)
 
 title = snamelong
-expname  = "AVISO_WhiteNoise_nclusters%i_" % (nclusters)
 expname += "_distmode%i_uncertmode_%i_absmode%i" % (distmode,uncertmode,absmode)
 outfigpath = expdir
 plot_results(clustered,uncert,expname,lat5,lon5,outfigpath,title=title)
