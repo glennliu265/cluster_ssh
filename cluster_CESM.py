@@ -42,7 +42,7 @@ import tbx
 
 # Set Paths
 datpath    = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/"
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210309/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210428/"
 
 # Experiment Names
 start       = '1993-01'
@@ -59,6 +59,10 @@ minpts      = 30 # Minimum points per cluster
 debug       = True
 savesteps   = True  # Save Intermediate Variables
 filteragain = False # Smooth variable again after coarsening 
+
+add_gmsl    = False # Add AVISO GMSL
+if add_gmsl:
+    rem_gmsl=2
 
 ensnum  = e+1
 datname = "CESM_ens%i_%s_to_%s_remGMSL%i" % (ensnum,start,end,rem_gmsl)
@@ -292,7 +296,7 @@ timesmon = np.array(["%04d-%02d"%(t.year,t.month) for t in times])
 
 # Find indices
 idstart  = np.where(timesmon==start)[0][0]
-idend    = np.where(timesmon==end)[0][0] + 1 
+idend    = np.where(timesmon==end)[0][0]
 
 # Restrict Data to period
 ssh     = ssh[idstart:idend,:,:]
@@ -364,7 +368,7 @@ ssha = ssha * mask[None,:,:]
 # ------------------
 lonf = 330
 latf = 50
-if rem_gmsl:
+if rem_gmsl>0:
     print("Removing GMSL")
     out1 = slutil.remove_GMSL(ssha,lat5,lon5,timesyr,viz=True,testpoint=[lonf,latf])
     
@@ -380,6 +384,36 @@ if rem_gmsl:
 else:
     print("GMSL Not Removed")
     
+
+# Add in the Aviso GMSL
+if add_gmsl:
+    gmslav = np.load(datpath+"AVISO_GMSL_1993-01_2013-01.npy")
+    ssh_ori = ssha.copy()
+    ssha += gmslav[:,None,None]
+    
+    fig,ax = plt.subplots(1,1)
+    ax.plot(gmslav,label="GMSL")
+    ax.plot()
+    
+    
+    
+    klon,klat = proc.find_latlon(lonf,latf,lon5,lat5)
+    fig,ax = plt.subplots(1,1)
+    #ax.set_xticks(np.arange(0,len(times)+1,12))
+    ax.set_xticks(np.arange(0,len(timesyr),12))
+    ax.set_xticklabels(timesyr[::12],rotation = 45)
+    ax.grid(True,ls='dotted')
+    
+    ax.plot(ssh_ori[:,klat,klon],label="Original",color='k')
+    ax.plot(ssha[:,klat,klon],label="After Addition")
+    ax.plot(gmslav,label="AVISO-GMSL")
+    
+    ax.legend()
+    ax.set_title("GMSL Addition at Lon %.2f Lat %.2f (%s to %s)" % (lon5[klon],lat5[klat],timesyr[0],timesyr[-1]))
+    ax.set_ylabel("SSH (m)")
+    plt.savefig(expdir+"GMSL_Addition.png",dpi=150)
+
+
 
 # --------------------------------------------------------
 # %% Compare with data that was anomalized, then smoothed
