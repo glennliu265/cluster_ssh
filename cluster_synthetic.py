@@ -31,7 +31,7 @@ import cartopy.feature as cfeature
 from pylab import cm
 from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
 from scipy.spatial.distance import squareform
-from scipy import stats
+from scipy import stats,signal
 # Custom Toolboxes
 import sys
 sys.path.append("/Users/gliu/Downloads/02_Research/01_Projects/01_AMV/00_Commons/03_Scripts/")
@@ -40,6 +40,8 @@ from amv import proc,viz
 import slutil
 import yo_box as ybx
 import tbx
+
+from statsmodels.regression import linear_model
 
 #%% Load Aviso Data
 
@@ -55,6 +57,7 @@ end         = '2013-01'
 nclusters   = 6
 rem_gmsl    = True
 rem_seas    = True
+dt_point    = True
 maxiter     = 5  # Number of iterations for elimiting points
 minpts      = 30 # Minimum points per cluster
 
@@ -70,7 +73,7 @@ print(expname)
 
 #Make Folders
 #expdir = outfigpath+expname +"/"
-expdir = outfigpath+"../20210414/"
+expdir = outfigpath+"../20210428/"
 checkdir = os.path.isdir(expdir)
 if not checkdir:
     print(expdir + " Not Found!")
@@ -297,10 +300,84 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
     rempts = rempts.reshape(nlat,nlon)
     return allclusters,alluncert,allcount,rempts,allWk
 
+def return_ar1_model(invar,simlen):
+    
+    """
+    Creates AR1 model for input timeseries [invar] thru the following steps:
+    
+        1. Calculate Lag 1 Correlation Coefficient (R) and Effective DOF
+        2. Calculates variance of noise sigma = sqrt[(1-R^2)*var(invar)]
+        3. Integrate y(t) = R*y(t-1) + N(0,sigma) for [simlen] steps
+    
+    
+    Inputs
+    ------
+    1) invar [time x lat x lon] - input variable
+    2) simlen [int] - simulation length
+    
+    Outputs
+    -------
+    1) rednoisemodel [simlen x lat x lon]
+    2) ar1_map [lat x lon]
+    3) neff_map [lat x lon]
+    
+    """
+    
+    # --------------------------------
+    # Part 1: Calculate AR1 and N_eff
+    # --------------------------------
+    # Remove NaNs
+    ntime,nlat5,nlon5 = invar.shape
+    invar = invar.reshape(ntime,nlat5*nlon5)
+    okdata,knan,okpts = proc.find_nan(invar,dim=0)
+    npts = invar.shape[1]
+    nok = okdata.shape[1]
+    # Compute Lag 1 AR for each and effective DOF
+    ar1  = np.zeros(nok)
+    neff = np.zeros(nok) 
+    for i in tqdm(range(nok)):
+        
+        ts = okdata[:,i]
+        r = np.corrcoef(ts[1:],ts[:-1])[0,1]
+        ar1[i] = r
+        neff[i] = ntime*(1-r)/(1+r)
+    
+    # Replace into domain
+    ar1_map = np.zeros(npts)*np.nan
+    neff_map = np.zeros(npts)*np.nan
+    ar1_map[okpts] = ar1
+    neff_map[okpts] = neff
+    ar1_map = ar1_map.reshape(nlat5,nlon5)
+    neff_map = neff_map.reshape(nlat5,nlon5)
+    
+    # ---------------------------------------
+    # Part 2: Get variance and make AR1 model
+    # ---------------------------------------
+    
+    # Calulate variance of noise
+    invar = invar.reshape(ntime,nlat5,nlon5)
+    n_sigma = np.sqrt((1-ar1_map**2)*np.var(invar,0))
+    
+    # Create model
+    rednoisemodel = np.zeros((simlen,nlat5,nlon5))
+    noisets = np.random.normal(0,1,rednoisemodel.shape)
+    noisets *= n_sigma[None,:,:]
+    for i in range(1,simlen):
+        rednoisemodel[i,:,:] = ar1_map * rednoisemodel[i-1,:,:] + noisets[i,:,:]
+    
+    # ---------------------------
+    # Apply landice mask to model
+    # ---------------------------
+    msk = invar.copy()
+    msk = msk.sum(0)
+    msk[~np.isnan(msk)] = 1
+    rednoisemodel*=msk[None,:,:]
+    
+    vardiff = (np.var(invar,0)) - np.var(rednoisemodel,0)
+    print("maximum difference in variance is %f"% np.nanmax(np.abs(vardiff)))
+    return rednoisemodel,ar1_map,neff_map
 
 #%%
-
-
 # Load data (preproc, then anomalized)
 st=time.time()
 ld = np.load("%sSSHA_AVISO_%sto%s.npz" % (datpath,start,end),allow_pickle=True)
@@ -357,7 +434,7 @@ else:
 #%% Remove Seasonal Cycle
 # ---------------------
 if rem_seas:
-    
+    print("Removing Seasonal Cycle!")
     # Copy and reshape data
     sshc = ssha.copy()
     ntime = sshc.shape[0]
@@ -417,6 +494,29 @@ if rem_seas:
 
     ssha = ssha2.copy()
 
+#
+# %% Detrend at each point
+#
+if dt_point:
+    print("Detrending Data at each point!")
+    ssha_dt = np.zeros(ssha.shape)*np.nan
+    for o in tqdm(range(nlon5)):
+        for a in range(nlat5):
+            hpt = ssha[:,a,o]
+            if np.any(np.isnan(hpt)):
+                continue
+            ssha_dt[:,a,o] = signal.detrend(hpt)
+            
+    # Test visualize
+    a = 22
+    o = 24
+    fig,ax = plt.subplots(1,1)
+    ax.plot(ssha[:,a,o],label="Original")
+    ax.plot(ssha_dt[:,a,o],label="DT")
+    ax.legend()
+    ax.set_title("Detrending Effects")
+    ssha = ssha_dt
+
 
 #
 #%% Calculate some characteristic timescales
@@ -437,16 +537,32 @@ sshac[:,okpts] = lagac
 sshac = sshac.reshape(nlags,nlat5,nlon5)
 
 
+# Apply Mask to Data
+msk = ssha.copy()
+msk = msk.sum(0)
+msk[~np.isnan(msk)] = 1
 
-# Test Plot
-klonss,klatss = proc.find_latlon(330,50,lon5,lat5)
-r = sshac[1,klatss,klonss]
-n_eff = int((ntime-nlags)*(1-r)/(1+r))
+# Calculate Significance (Using 2-sided T-Test)
 p = 0.05
 tails = 2
 ptilde    = p/tails
-critval   = stats.t.ppf(1-ptilde,n_eff)
-corrthres = np.sqrt(1/ ((n_eff/np.power(critval,2))+1))
+n_effall  = np.round((ntime-nlags)*(1- sshac[1,...])/(1+ sshac[1,...]))
+critval   = stats.t.ppf(1-ptilde,n_effall)
+corrthresall = np.sqrt(1/ ((n_effall/np.power(critval,2))+1))
+
+
+# Test Plot
+lonf = 230
+latf = 20
+klonss,klatss = proc.find_latlon(lonf,latf,lon5,lat5)
+r = sshac[1,klatss,klonss]
+n_eff = int((ntime-nlags)*(1-r)/(1+r))
+# p = 0.05
+# tails = 2
+# ptilde    = p/tails
+# critval   = stats.t.ppf(1-ptilde,n_eff)
+# corrthres = np.sqrt(1/ ((n_eff/np.power(critval,2))+1))
+corrthres = corrthresall[klatss,klonss]
 
 fig,ax = plt.subplots(1,1)
 ax.scatter(np.arange(0,nlags,1),sshac[:,klatss,klonss],20,color='r',marker="o")
@@ -463,24 +579,58 @@ plt.savefig("%sTimescale_lon%i_lat%i.png"%(expdir,lon5[klonss],lat5[klatss]),dpi
 
 
 
-# Find Nearest Month
-msk = ssha.copy()
-msk = msk.sum(0)
-msk[~np.isnan(msk)] = 1
+
+
+# ----------------------------------
+# Find Nearest Month (1/e threshold)
+# ----------------------------------
+thres = 1/np.exp(1)
 tau = sshac.copy()
-tau = np.argmin(np.abs(tau-1/np.exp(1)),0)
+tau = np.argmax(tau<thres,axis=0)
+cintscl = [12]
+
+lonf = 230
+latf = 20
+vlim = [0,24]
+cints = np.arange(0,25,3)
 fig,ax = plt.subplots(1,1,subplot_kw={'projection':ccrs.PlateCarree()})
 ax = slutil.add_coast_grid(ax)
-pcm = ax.pcolormesh(lon5,lat5,tau*msk,cmap='Blues')
-fig.colorbar(pcm,ax=ax)
+pcm = ax.pcolormesh(lon5,lat5,tau*msk,vmin=vlim[0],vmax=vlim[-1],cmap='Blues')
+cl = ax.contour(lon5,lat5,tau*msk,levels=cintscl,colors='k',linewidths=0.75)
+ax.clabel(cl,fmt="%i")
+#pcm = ax.contourf(lon5,lat5,tau*msk,levels=cints,cmap='Blues')
+#ax.scatter(lonf,latf,100,marker="x",color='k')
+ax.set_title("Characteristic Timescale in Months \n 1/e Threshold (r > %.3f)"%thres)
+fig.colorbar(pcm,ax=ax,fraction=0.03)
 plt.savefig("%sTimescale_efold.png"%(expdir),dpi=150)
 
 
+#
+# Find Nearest Month (Significance Threshold)
+#'
+tausig = sshac.copy()
+tausig = np.argmax(tausig<corrthresall[None,:,:],axis=0)
+
+lonf = 230
+latf = 20
+vlim = [0,24]
+cints = np.arange(0,25,3)
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':ccrs.PlateCarree()})
+ax = slutil.add_coast_grid(ax)
+pcm = ax.pcolormesh(lon5,lat5,tausig*msk,vmin=vlim[0],vmax=vlim[-1],cmap='Blues')
+#pcm = ax.contourf(lon5,lat5,tau*msk,levels=cints,cmap='Blues')
+#ax.scatter(lonf,latf,100,marker="x",color='k')
+ax.set_title("Characteristic Timescale in Months \n 2-Sided T-Test (p=%.2f)"%p)
+fig.colorbar(pcm,ax=ax,fraction=0.03)
+plt.savefig("%sTimescale_Ttest.png"%(expdir),dpi=150)
 
 
 
+#
+# % Calculate Decorrelation time
+#
 
-
+maxar1 = np.nanmax(sshac[1,:,:]) # Find Maximum Autocorrelation
 # ----------------------
 #%% Design Low Pass Filter
 # ----------------------
@@ -527,13 +677,14 @@ plt.savefig("%sFilter_Transfer_%imonLP_%ibandavg_%s.png"%(expdir,tw,M,expname),d
 
 #%% Make Synthetic timeseries
 
+simlen = 10000
 msk = sla_lp.copy()
 msk = msk.sum(0)
 msk[~np.isnan(msk)] = 1
 
 
 # Create white noise timeseries
-wn = np.random.normal(0,1,sla_lp.shape)
+wn = np.random.normal(0,1,(simlen,nlat5,nlon5))
 wn *= msk[None,:,:]
 
 # Create scaled form of timeseries
@@ -541,18 +692,69 @@ aviso_std = sla_lp.std(0)
 wnstd = wn.copy()
 wnstd *= aviso_std[None,:,:]
 
+
+
+
+# Make red noise timeseries
+rnstd,ar1m,neffm = return_ar1_model(ssha,simlen)
+
+# Select the last n points (match sample size of aviso)
+wnstd = wnstd[-ntime:,:,:]
+rnstd = rnstd[-ntime:,:,:]
+
 # Low Pass Filter The Timeseries
 wnlp = slutil.lp_butter(wnstd,tw,order)
+rnlp = slutil.lp_butter(rnstd,tw,order)
 
 
+if debug:
+    
+    # Plot AR1 Map
+    fig,ax = plt.subplots(1,1,subplot_kw={'projection' : ccrs.PlateCarree()})
+    ax = viz.add_coast_grid(ax)
+    #diff = np.var(ssha,0) - np.var(rnstd,0)
+    #vlm = np.nanmax(np.abs(ar1_map))
+    pcm = ax.pcolormesh(lon5,lat5,ar1m,vmin=-1,vmax=1,cmap=cmocean.cm.balance)
+    fig.colorbar(pcm,ax=ax,fraction = 0.025)
+    ax.set_title("AR1(SSH)")
+    plt.savefig("%sAR1_AVISO.png"%outfigpath,dpi=150)
+    
+    
+    
+    # Plot Differences in Variance
+    fig,ax = plt.subplots(1,1,subplot_kw={'projection' : ccrs.PlateCarree()})
+    ax = viz.add_coast_grid(ax)
+    diff = np.var(ssha,0) - np.var(rnstd,0)
+    vlm = np.nanmax(np.abs(diff))
+    pcm = ax.pcolormesh(lon5,lat5,diff,vmin=-vlm,vmax=vlm,cmap=cmocean.cm.balance)
+    fig.colorbar(pcm,ax=ax,fraction = 0.025)
+    ax.set_title("Var(SSH) - Var(Red Noise Model)")
+    plt.savefig("%sVarianceRedNoiseModel_Difference.png"%outfigpath,dpi=150)
+    
+    # # Plot Differences in AR1
+    # fig,ax = plt.subplots(1,1,subplot_kw={'projection' : ccrs.PlateCarree()})
+    # ax = viz.add_coast_grid(ax)
+    # diff = np.var(ssha,0) - np.var(rnstd,0)
+    # vlm = np.nanmax(np.abs(diff))
+    # pcm = ax.pcolormesh(lon5,lat5,diff,vmin=-vlm,vmax=vlm,cmap=cmocean.cm.balance)
+    # fig.colorbar(pcm,ax=ax,fraction = 0.036)
+    # ax.set_title("AR1(SSH) - AR1(Model)")
+    # plt.savefig("%sVarianceRedNoiseModel_Difference.png"%outfigpath,dpi=150)
+    
+    
+    
+    
 # Add a trend
+#% ------------------------------------------
 #%% Do some clustering, with some experiments
+#% ------------------------------------------
 
 
 # distmode
 # 0: Default (Distance and Corr)
 # 1: Distance Only
 # 2: Corr Only
+# 3: Red Noise Dist
 
 # uncertmode
 # 0: Default (E(Cov_in) / E(Cov_out))
@@ -563,9 +765,15 @@ wnlp = slutil.lp_butter(wnstd,tw,order)
 # 1: Absolute Values: Take abs(corr) and abs(cov)
 # 2: Anti: Take -1*corr, -1*cov
 
-varin      = wnstd
-snamelong  = "White Noise (Unfiltered)"
-expname    = "AVISO_WhiteNoise_nclusters%i_" % (nclusters)
+varin      = rnlp
+chardist   = 0
+#snamelong  = "Red Noise (Filtered)"
+snamelong = "Red Noise (Filtered)"
+#snamelong  = "Distance Only"
+#snamelong  = "Characteristic Distance = %i km "% chardist
+expname    = "AVISO_RedNoise_nclusters%i_Filtered_" % (nclusters)
+#expname    = "AVISO_WhiteNoise_nclusters%i_Filtered_" % (nclusters)
+#expname = "AVISO_WhiteNoise_chardist%i_nclusters%i_Filtered_" % (chardist,nclusters)
 distmode   = 0
 absmode    = 0
 uncertmode = 0
@@ -596,6 +804,9 @@ elif distmode == 1:
     distance_matrix = 1-expterm
 elif distmode == 2:
     distance_matrix = 1-srho
+elif distmode == 3:
+    distance_matrix = 1-expterm*np.exp(-distthres/chardist)
+    
 
 # --------------------------
 # Do Clustering (scipy)
@@ -856,6 +1067,68 @@ neff_map[okpts] = neff
 ar1_map = ar1_map.reshape(nlat5,nlon5)
 neff_map = neff_map.reshape(nlat5,nlon5)
 
+#%% Make Red Noise Model
+# Calculate stdev of the noise for AR1 model var(n) = (1-rho**2) * var(y)
+n_sigma = np.sqrt((1-ar1_map**2)*np.var(ssha,0))
+
+simlen = 240
+
+# Create model
+rednoisemodel = np.zeros((simlen,nlat5,nlon5))
+noisets = np.random.normal(0,1,rednoisemodel.shape)
+noisets *= n_sigma[None,:,:]
+for i in range(1,simlen):
+    rednoisemodel[i,:,:] = ar1_map * rednoisemodel[i-1,:,:] + noisets[i,:,:]
+    
+
+
+vardiff = (np.var(ssha,0)) - np.var(rednoisemodel,0)*msk
+# # Test Plot
+# fig,ax = plt.subplots(1,1)
+# pcm = ax.pcolormesh(lon5,lat5,)
+# fig.colorbar(pcm,ax=ax)
+# ax.set_title("Original Variance")
+
+# fig,ax = plt.subplots(1,1)
+# pcm = ax.pcolormesh(lon5,lat5,np.var(rednoisemodel,0)*msk)
+# fig.colorbar(pcm,ax=ax)
+# ax.set_title("Simulated Variance")
+
+fig,ax = plt.subplots(1,1)
+pcm = ax.pcolormesh(lon5,lat5,vardiff)
+fig.colorbar(pcm,ax=ax)
+ax.set_title("Difference in Variance")
+print(np.nanmax(np.abs(vardiff)))
+
+
+
+
+    
+
+
+
+
+#%% Red Noise Mmodel Test at a single point
+
+test_ar1 = ar1_map[klatss,klonss]
+test_ssh = ssha[:,klatss,klonss]
+test_var = (1-test_ar1**2)*(np.var(test_ssh))
+test_sig = np.sqrt(test_var)
+
+lmrho,lmsigma=linear_model.yule_walker(test_ssh,order=1,method='adjusted')
+
+simlen=240
+noisets = np.random.normal(0,test_sig,simlen)
+
+
+ytest = np.zeros(simlen)
+for i in range(1,simlen):
+    ytest[i] = test_ar1*ytest[i-1] + noisets[i] 
+    
+print("Simulated Correlation is %f "% (np.corrcoef(ytest[1:],ytest[:-1])[0,1]))
+print("Actual Correlation is %f "% (test_ar1))
+print("Simulated Variance is %f"% (np.var(ytest)))
+print("Actual Variance is %f"% (np.var(test_ssh)))
 #%% Visualize some plots
 
 
