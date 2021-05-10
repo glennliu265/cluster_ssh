@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 datpath = "/vortex/jetstream/climate/data1/yokwon/CESM1_LE/downloaded/ocn/proc/tseries/monthly/SSH/"
 outpath = "/stormtrack/data3/glliu/01_Data/03_SeaLevelProject/SSH/Regridded/"
-mconfig = "R85"
+mconfig = "PIC"
 mnum    = np.hstack([np.arange(1,36,1),np.arange(101,108,1)])
 
 latlonf = "/home/glliu/01_Data/cesm_latlon360.npz"
@@ -168,3 +168,43 @@ if mconfig=="R85":
         outname = outpath + "SSH_%s_ens%02d.nc" % (mconfig,e+1)
         ds_regrid.to_netcdf(outname,encoding={'SSH': {'zlib': True}})   
         e+=1
+
+#%% Add Preindustrial Control Option
+
+if mconfig = "PiC":
+    
+    # Locate and Load Files
+    ncstring = "b.e11.B1850C5CN.f09_g16.*.pop.h.SSH.*.nc"
+    nclist = glob.glob(datpath+ncstring)
+    nclist.sort()
+    nfiles = len(nclist)
+    print("Found %i files" % (nfiles))
+    
+    dsall = xr.open_mfdataset(nclist,concat_dim='time',preprocess=preprocess)
+    dsall = fix_febstart(dsall)
+    
+    
+    # Set up lat/lon target grid
+    ds_out = xr.Dataset({'lat': (['lat'], lat), 'lon': (['lon'], lon) })
+    dy = lat[1]-lat[0]
+    dx = lon[1]-lon[0]
+
+    # Visualize first timestep and grid
+    if debug:
+        dsall.SSH.isel(time=0).plot()
+        plt.show()
+        
+        plt.scatter(dsall['TLONG'], dsall['TLAT'], s=0.01)
+        plt.show()
+        
+    # Rename Lat/Lon
+    dsall = dsall.rename({'TLONG': 'lon', 'TLAT': 'lat'})    
+    
+    # Regrid
+    regridder = xe.Regridder(dsall, ds_out, 'bilinear',periodic=True)
+    ds_regrid = regridder(dsall.SSH)
+    
+    # Save the output
+    outname = outpath + "SSH_%s.nc" % (mconfig)
+    ds_regrid.to_netcdf(outname,encoding={'SSH': {'zlib': True}})   
+    #b.e11.B1850C5CN.f09_g16.005.pop.h.SSH.040001-049912.nc
