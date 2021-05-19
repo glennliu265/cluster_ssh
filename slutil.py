@@ -11,7 +11,9 @@ Created on Sun Mar 14 21:51:31 2021
 
 from scipy.ndimage import gaussian_filter
 
+
 import matplotlib.pyplot as plt
+import matplotlib.cm as mcm
 import xarray as xr
 import numpy as np
 
@@ -36,6 +38,7 @@ from pylab import cm
 
 
 from sklearn.metrics.pairwise import haversine_distances
+from sklearn.metrics import silhouette_score,silhouette_samples
 from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
 from scipy.spatial.distance import squareform
 
@@ -383,3 +386,89 @@ def check_lpfilter(rawdata,lpdata,chkval,M,tw,dt=24*3600*30):
     plt.tight_layout()
     
     return lpspec,rawspec,p24,filtxfer,fig,ax
+
+
+def plot_silhouette(clusterout,nclusters,s,cmap=None,ax1=None,xlm=[-.25, 1]):
+        """
+        Make a silhouette plot
+        
+        Parameters
+        ----------
+        clusterout : ARRAY [nsamples]
+            Cluster Labels
+        nclusters : INT
+            Number of clusters
+        s : ARRAY [nsamples]
+            Silhouette coefficient for each cluster
+        cmap : List of colors, optional
+            Colors for each cluster. The default is None.
+        ax1 : matplotlib axes, optional
+            Axis to plot on. The default is None.
+        xlm : [xlower, xupper], optional
+            xlimits for plotting. The default is [-.25, 1].
+
+        Returns
+        -------
+        ax1 : matplotlib axes
+            matplotlib axes containing result.
+        """
+        # Adapted from: 
+        #https://scikit-learn.org/stable/auto_examples/cluster/plot_kmeans_silhouette_analysis.html#sphx-glr-auto-examples-cluster-plot-kmeans-silhouette-analysis-py
+        
+
+    
+        
+        # Make Silhouette plot
+        y_lower=10
+        
+        if ax1 is None:
+            fig, ax1 = plt.subplots(1, 1)
+        
+        # Set x and y limits
+        ax1.set_xlim(xlm)
+        ax1.set_ylim([0, len(clusterout) + (nclusters + 1) * 10])
+        
+        s_score = s.mean()
+        
+        # Make a plot, aggregating by cluster
+        for i in range(nclusters):
+            
+            # Get silhouette scores for cluster and sort
+            cid = i + 1
+            ith_cluster_silhouette_values = s[clusterout == cid]
+            ith_cluster_silhouette_values.sort()
+            
+            # Get y bounds for plotting
+            size_cluster_i = ith_cluster_silhouette_values.shape[0]
+            y_upper = y_lower + size_cluster_i
+            
+            # Geet Colormap
+            if cmap is None:
+                color = mcm.nipy_spectral(float(cid) / nclusters)
+            else:
+                color = cmap[i]
+                
+            ax1.fill_betweenx(np.arange(y_lower, y_upper),
+                              0, ith_cluster_silhouette_values,
+                              facecolor=color, edgecolor=color, alpha=0.7)
+            
+            # Label the silhouette plots with their cluster numbers at the middle
+            ax1.text(-0.05, y_lower + 0.5 * size_cluster_i, str(cid))
+            
+            # Compute the new y_lower for next plot
+            y_lower = y_upper + 10  # 10 for the 0 samples
+            print(cid)
+            print(y_lower)
+        
+        # Labels
+        ax1.set_title("Silhouette Plot")
+        ax1.set_xlabel("Silhouette Coefficient")
+        ax1.set_ylabel("Cluster Label")
+        
+        # The vertical line for average silhouette score of all the values
+        ax1.axvline(x=s_score, color="red", linestyle="--")
+        
+        ax1.set_yticks([])  # Clear the yaxis labels / ticks
+        ax1.set_xticks([-0.1, 0, 0.2, 0.4, 0.6, 0.8, 1])
+        
+        return ax1
