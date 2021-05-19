@@ -260,6 +260,49 @@ def make_distmat(srho,sdist,distthres=3000,rhowgt=1,distwgt=1):
     distance_matrix = 1-expterm*srho
     
     return distance_matrix
+
+def calc_silhouette(distance_matrix,clusterout,nclusters):
+        """
+        Quick wrapper to calculate silhouette metrics.
+
+        Parameters
+        ----------
+        distance_matrix : ARRAY [nsamples x nsamples]
+            Distance metric used for clustering
+        clusterout : ARRAY [nsamples]
+            Clustering Labels
+
+        Returns
+        -------
+        s_score : NUMERIC
+            Averaged silhouette coefficient for all values
+        s : ARRAY [nsamples,]
+            Silhouette coefficient for each point
+        s_bycluster : 
+            DESCRIPTION.
+
+        """
+        
+        # Calculate silhouette score (1 value)
+        s_score = silhouette_score(distance_matrix,clusterout,metric="precomputed")
+    
+        # Calculate the silhouette for each point
+        s       = silhouette_samples(distance_matrix,clusterout,metric='precomputed')
+        print("Calculated from SKlearn is %.3f" % s_score)
+        
+        # Calculate s for each cluster
+        s_cluster = np.zeros(nclusters)
+        counts    = s_cluster.copy()
+        for i in range(len(clusterout)):
+            cluster_id = clusterout[i]-1
+            
+            # Record Silhouette Score and Count
+            s_cluster[cluster_id] += s[i]
+            counts[cluster_id] += 1
+        s_bycluster = s_cluster / counts
+        
+        return s_score,s,s_bycluster
+
 # -----------------
 # %% Visualization
 # -----------------

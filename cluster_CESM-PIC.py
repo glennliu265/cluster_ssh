@@ -9,8 +9,10 @@ Created on Wed Mar 10 10:10:37 2021
 """
 
 from sklearn.metrics.pairwise import haversine_distances
+from sklearn.metrics import silhouette_score,silhouette_samples
 
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import xarray as xr
 import numpy as np
 
@@ -43,7 +45,8 @@ import tbx
 
 # Set Paths
 datpath    = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/"
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210428/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210519/"
+proc.makedir(outfigpath)
 
 # Experiment Names
 #start       = '1993-01'
@@ -83,7 +86,8 @@ else:
 #%% Functions
 
 def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
-                returnall=False,absmode=0,distmode=0,uncertmode=0,printmsg=True):
+                returnall=False,absmode=0,distmode=0,uncertmode=0,printmsg=True,
+                calcsil=False):
     
     # ---------------------------------------------
     # Calculate Correlation, Covariance, and Distance Matrices
@@ -121,6 +125,15 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
     cdist      = squareform(distance_matrix,checks=False)
     linked     = linkage(cdist,'weighted')
     clusterout = fcluster(linked, nclusters,criterion='maxclust')
+    
+    
+    # --------------------
+    # Calculate Silhouette
+    # --------------------
+    if calcsil:
+        s_score,s,s_bycluster = slutil.calc_silhouette(distance_matrix,clusterout,nclusters)
+    # fig,ax = plt.subplots(1,1)
+    # ax = slutil.plot_silhouette(clusterout,nclusters,s,ax1=ax)
     
     # -------------------------
     # Calculate the uncertainty
@@ -174,6 +187,8 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
     uncert[okpts] = uncertout
     uncert = uncert.reshape(nlat,nlon)
     
+    if calcsil: # Return silhouette values
+        return clustered,uncert,cluster_count,Wk,s,s_bycluster
     if returnall:
         return clustered,uncert,cluster_count,Wk,srho,scov,sdist,distance_matrix
     return clustered,uncert,cluster_count,Wk
@@ -231,7 +246,8 @@ def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath):
     
 
 def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
-                absmode=0,distmode=0,uncertmode=0,viz=True,printmsg=True):
+                absmode=0,distmode=0,uncertmode=0,viz=True,printmsg=True,
+                calcsil=False):
     
     ntime,nlat,nlon = sla.shape
     slain = sla.copy()
@@ -241,6 +257,9 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
     alluncert   = []
     allcount    = []
     allWk = []
+    if calcsil:
+        alls           = []
+        alls_byclust = []
     rempts      = np.zeros((nlat*nlon))*np.nan
     
     # Loop
@@ -254,9 +273,16 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
         #print("Iteration %i ========================="%it)
         
         # Perform Clustering
-        clustered,uncert,cluster_count,Wk = cluster_ssh(slain,lat,lon,nclusters,distthres=distthres,
+        clustoutput = cluster_ssh(slain,lat,lon,nclusters,distthres=distthres,
                                                      absmode=absmode,distmode=distmode,uncertmode=uncertmode,
-                                                     printmsg=printmsg)
+                                                     printmsg=printmsg,calcsil=calcsil)
+        
+        if calcsil:
+            clustered,uncert,cluster_count,Wk,s,s_byclust = clustoutput
+            alls.append(s)
+            alls_byclust.append(s_byclust)
+        else:
+            clustered,uncert,cluster_count,Wk = clustoutput
         
         # Save results
         allclusters.append(clustered)
@@ -296,6 +322,8 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
     if printmsg:
         print("COMPLETE after %i iterations"%it)
     rempts = rempts.reshape(nlat,nlon)
+    if calcsil:
+        return allclusters,alluncert,allcount,rempts,allWk,alls,alls_byclust
     return allclusters,alluncert,allcount,rempts,allWk
 
 
@@ -387,18 +415,18 @@ else:
 # # -----------------------------------------
 # # Limit to particular period (CESM Version)
 # # -----------------------------------------
-# # Convert Datestrings
-# timesmon = np.array(["%04d-%02d"%(t.year,t.month) for t in times])
+# Convert Datestrings
+timesmon = np.array(["%04d-%02d"%(t.year,t.month) for t in times])
 
-# # Find indices
-# idstart  = np.where(timesmon==start)[0][0]
-# idend    = np.where(timesmon==end)[0][0]
+# Find indices
+idstart  = np.where(timesmon==start)[0][0]
+idend    = np.where(timesmon==end)[0][0]
 
-# # Restrict Data to period
-# ssh     = ssh[idstart:idend,:,:]
-# timeslim = timesmon[idstart:idend]
-# timesyr  = np.array(["%04d"%(t.year) for t in times])[idstart:idend]
-# ntimer   = ssh.shape[0]
+# Restrict Data to period
+ssh     = ssh[idstart:idend,:,:]
+timeslim = timesmon[idstart:idend]
+timesyr  = np.array(["%04d"%(t.year) for t in times])[idstart:idend]
+ntimer   = ssh.shape[0]
 
 # # -------------------------
 # # Remove the Long Term Mean
@@ -513,15 +541,17 @@ if savesteps: # Save low-pass-filtered result, right before clustering
         'lat':lat5,
         'times':times
         })
-    
+
+
+
+
+
+
     
 #%% Cluster in moving windows
 
 sla_in = sla_lp[:,:,:]
 maxiter = 6
-
-
-
 
 # Get ranges for sliding window
 winsize = 240
@@ -545,8 +575,6 @@ for i in tqdm(range(ntime-240)):
     Wks.append(allWk)
     
 
-
-
 np.savez("%s%s_Results_winsize%i.npz"%(datpath,expname,winsize),**{
     'lon':lon5,
     'lat':lat5,
@@ -557,9 +585,6 @@ np.savez("%s%s_Results_winsize%i.npz"%(datpath,expname,winsize),**{
     'rempts':np.array(rempts),
     'Wks':np.array(Wks)},allow_pickle=True)
 
-
-
-
 test = clusters[0]
 
 
@@ -568,11 +593,12 @@ test = clusters[0]
 #%% Making the Regiondict
 from scipy import stats
 import itertools
+import matplotlib as mpl
 
 ldzo = np.load(datpath+"CESM_PIC_remGMSL0_6clusters_minpts30_maxiters5_Results_winsize240.npz",allow_pickle=True)
 test = ldzo["clusters"]
 
-
+# Set Region IDs
 regionids = ("1: Northwest Pacific",
              "2: ST N. Atl",
              "3: SP N. Atl",
@@ -581,6 +607,7 @@ regionids = ("1: Northwest Pacific",
              "6: South Atlantic"
              )
 
+# Make Region Colors
 regioncolors = np.array(
                 [[233,51,35],
                 [73,161,68],
@@ -589,7 +616,7 @@ regioncolors = np.array(
                 [81,135,195],
                 [138,39,113],
                 ])/255
-
+cmapn = (mpl.colors.ListedColormap(regioncolors))
 
 cmap = cm.get_cmap("jet",nclusters)
 
@@ -622,7 +649,7 @@ regiondict = {1:[150,180,5,50],
 #%% Some New Tools
 
 
-def remapcluster(inclust,lat5,lon5,regiondict):
+def remapcluster(inclust,lat5,lon5,regiondict,printmsg=True,returnremap=False):
     
     # Remap an input cluster [inclust] according
     # to a regiondict.
@@ -634,14 +661,15 @@ def remapcluster(inclust,lat5,lon5,regiondict):
     clusternewflat = clusternew.flatten()
     clusteroldflat = inclust.flatten()
     assigned = []
+    remapdict = {}
     for r in regiondict.keys():
-        print(r)
+        #print(r)
         # Get Region
         bbox = regiondict[r].copy()
         for i in range(2): # Just check Longitudes
             if bbox[i] < 0:
                 bbox[i]+=360
-        varr,lonr,latr,=proc.sel_region(inclust.T,lon5,lat5,bbox)
+        varr,lonr,latr,=proc.sel_region(inclust.T,lon5,lat5,bbox,warn=printmsg)
         
         
         # Get rid of NaNs
@@ -661,8 +689,10 @@ def remapcluster(inclust,lat5,lon5,regiondict):
             
             # Assign new cluster
             clusternewflat[clusteroldflat==ele] = r
-            print("Reassigned Class %i to %i" % (ele,r))
+            if printmsg:
+                print("Reassigned Class %i to %i" % (ele,r))
             assigned.append(int(ele))
+            remapdict[int(ele)] = r
             done=True
         
         if done is False: # When no cluster is assigned...
@@ -671,8 +701,12 @@ def remapcluster(inclust,lat5,lon5,regiondict):
             ele = unassigned[0]
             clusternewflat[clusteroldflat==ele] = r
             assigned.append(int(ele))
-            print("Reassigned (Leftover) Class %i to %i because nothing was found" % (ele,r))
+            remapdict[int(ele)] = r
+            if printmsg:
+                print("Reassigned (Leftover) Class %i to %i because nothing was found" % (ele,r))
     clusternew = clusternewflat.reshape(nlat,nlon)
+    if returnremap:
+        return clusternew,remapdict
     return clusternew
         
 def patterncorr(map1,map2):
@@ -694,8 +728,6 @@ def patterncorr(map1,map2):
     # calculate
     R = 1/N*np.sum(map1a*map2a)/(std1*std2)
     return R
-
-
 
 def make_mapdict(oldclass,newclass):
     mapdict = {oldclass[i] : newclass[i] for i in range(len(oldclass))}
@@ -740,10 +772,12 @@ def calc_cluster_patcorr(inclust,evalclust,oldclass=None,returnmax=True):
     return patcor
 
 #%% Testing out the functions
+inclust = testmap
 
 
 # Remapping Clusters
 clusternew = remapcluster(testmap,lat5,lon5,regiondict)
+
 
 # Plot Remapped Result
 fig,ax = plt.subplots(1,1,subplot_kw={'projection':ccrs.PlateCarree()})
@@ -760,29 +794,17 @@ for i in np.arange(1,7):
 fig.colorbar(pcm,ax=ax)
 
 
-
 # Example here of testing out patterncorr script
 map1 = testmap
 map2 = clusternew
 patterncorr(map2,map1)
 
-
-
-    
-    
-    
+# Testing patcorr iteratively 
 patcorr = calc_cluster_patcorr(inclust,clusternew,returnmax=True)
     
 
 
 
-    
-    
-    
-
-
-import matplotlib as mpl
-cmapn = (mpl.colors.ListedColormap(regioncolors))
 
 
 
@@ -796,7 +818,288 @@ rempt     = [nlat,nlon]
 
 """
 
+
+#
+# %% First, Cluster for the whole PIC
+#
+
+sla_in = sla_lp[:,:,:]
+
+# Do Clustering
+allclusters,alluncert,allcount,rempt,allWk = elim_points(sla_in,lat5,lon5,nclusters,minpts,maxiter,expdir,
+                                                             viz=False,printmsg=False)
+
+inclust = np.array(allclusters[0])
+inuncert = np.array(alluncert[0])
+
+# Adjust classes
+clusterPIC = remapcluster(inclust,lat5,lon5,regiondict)
+
+# Plot some results (Clusters Themselves)
+proj = ccrs.PlateCarree(central_longitude=180)
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax     = viz.add_coast_grid(ax)
+pcm=ax.pcolormesh(lon5,lat5,clusterPIC,cmap=cmapn,transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title("CESM-PiC Clusters (Year 400 to 2200)")
+plt.savefig("%sCESM1PIC_%s_Clusters_all.png"%(outfigpath,expname),dpi=200,bbox_inches='tight')
+
+# Now Plot the Uncertainties
+vlm = [-10,10]
+proj = ccrs.PlateCarree(central_longitude=180)
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax     = viz.add_coast_grid(ax)
+pcm=ax.pcolormesh(lon5,lat5,inuncert,vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title(r"CESM-PIC Cluster Uncertainty $(<\sigma^{2}_{in,x}>/<\sigma^{2}_{out,x}>)$"+" \n (Year 400 to 2200) ")
+plt.savefig("%sCESM1PIC_%s_Uncert_all.png"%(outfigpath,expname),dpi=200,bbox_inches='tight')
+
+
+
+# Reassign to another Map
+clusterPICALL = clusterPIC.copy()
+#
+# %% Next, Cluster for some specific time period
+#
+
+start = '1750-02'
+end   = '2200-12'
+#end   = '1300-01'
+
+# start = '1300-02'
+# end   = '2200-12'
+
+
+# Convert Datestrings
+timesmon = np.array(["%04d-%02d"%(t.year,t.month) for t in times])
+
+# Find indices
+idstart  = np.where(timesmon==start)[0][0]
+idend    = np.where(timesmon==end)[0][0]
+
+# Restrict Data to period
+sla_in     = sla_lp[idstart:idend,:,:]
+timeslim = timesmon[idstart:idend]
+timesyr  = np.array(["%04d"%(t.year) for t in times])[idstart:idend]
+ntimer   = sla_in.shape[0]
+
+timestr = "%s_to_%s" % (start,end)
+timestrtitle = "%s to %s" % (start[:4],end[:4])
+
+# Do Clustering
+allclusters,alluncert,allcount,rempt,allWk = elim_points(sla_in,lat5,lon5,nclusters,minpts,maxiter,expdir,
+                                                             viz=False,printmsg=False)
+
+inclust = np.array(allclusters[-1])
+inuncert = np.array(alluncert[-1])
+
+# Adjust classes
+clusterPIC = inclust
+#clusterPIC = remapcluster(inclust,lat5,lon5,regiondict)
+patcorr = calc_cluster_patcorr(clusterPIC,clusterPICALL,returnmax=True)
+
+# Plot some results (Clusters Themselves)
+proj = ccrs.PlateCarree(central_longitude=180)
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax     = viz.add_coast_grid(ax)
+pcm=ax.pcolormesh(lon5,lat5,clusterPIC,cmap=cmapn,transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title("CESM-PiC Clusters (Year %s) \n Pattern Correlation = %.3f" % (timestrtitle,patcorr))
+plt.savefig("%sCESM1PIC_%s_Clusters_%s.png"%(outfigpath,expname,timestr),dpi=200,bbox_inches='tight')
+
+
+# Now Plot the Uncertainties
+vlm = [-10,10]
+proj = ccrs.PlateCarree(central_longitude=180)
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax     = viz.add_coast_grid(ax)
+pcm=ax.pcolormesh(lon5,lat5,inuncert,vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title(r"CESM-PIC Cluster Uncertainty $(<\sigma^{2}_{in,x}>/<\sigma^{2}_{out,x}>)$"+" \n (Year %s) " % (timestrtitle))
+plt.savefig("%sCESM1PIC_%s_Uncert_%s.png"%(outfigpath,expname,timestr),dpi=200,bbox_inches='tight')
+
+
+
+
+#%% Calculate Pattern Correlation for each moving 20-year window
+
+npers = len(test)
+
+remapclusts = np.zeros((npers,nlat5,nlon5))*np.nan
+
+for i in tqdm(range(npers)):
+    inclust    = np.array(test[i])[-1,:,:]
+    clusterPIC = remapcluster(inclust,lat5,lon5,regiondict,printmsg=False)
+    remapclusts[i,:,:] = clusterPIC.copy()
+    
+
+
+#%% Make an animation
+
+from matplotlib.animation import FuncAnimation
+import matplotlib.animation as animation
+
+# Animation parameters
+frames = 12 #Indicate number of frames
+figsize = (8,6)
+vm = [-5,5]
+interval = 0.1
+bbox = [-80,0,0,80]
+fps= 10
+savetype="mp4"
+dpi=100
+
+yrstrs = []
+for i in tqdm(range(ntime-240)):
+    rng = np.arange(i,i+winsize+1)
+    yrstr = "%s to %s" % (timesmon[rng[0]][:4],timesmon[rng[-1]][:4])
+    yrstrs.append(yrstr)
+
+
+lon180,remap180 = proc.lon360to180(lon5,remapclusts.transpose(2,1,0))
+
+invar = remap180.transpose(1,0,2)
+#invar = remapclusts.transpose(1,2,0) # [lat x lon x time]
+
+def make_figure():
+    fig = plt.figure(figsize=figsize)
+    ax = fig.add_subplot(1,1,1,projection=ccrs.PlateCarree())
+    ax     = viz.add_coast_grid(ax)
+    return fig,ax
+
+start = time.time()
+fig,ax = make_figure() # Make the basemap
+pcm = ax.pcolormesh(lon180,lat5,invar[...,i],cmap=cmapn)
+fig.colorbar(pcm,orientation='horizontal',fraction=0.046,pad=0.05)
+
+pcm.set_array(invar[:,:,i].ravel())
+
+
+def animate(i):
+     pcm.set_array(invar[...,i].flatten())
+     ax.set_title("Years %s" % (yrstrs[i]))
+     print("\rCompleted frame %i"%i,end="\r",flush=True)
+     
+anim = FuncAnimation(
+    fig, animate, interval=interval, frames=frames, blit=False,)
+
+#anim.save('%sForcingAnim.mp4'%outfigpath, writer=animation.FFMpegWriter(fps=fps),dpi=dpi)
+anim.save('%ssst_test.gif'%outfigpath, writer='imagemagick',fps=fps,dpi=dpi)
+
+# Pass figure animator and draw on it
+# blit = True, redraw only parts that have changed
+print("Animation completed in %.2fs"%(time.time()-start))
+
+
+
+# ------------------------
+#%% Try Silhouette Metric
+# -----------------------
+
+
+start = '0400-01'
+end   = '2200-12'
+
+# Convert Datestrings
+timesmon = np.array(["%04d-%02d"%(t.year,t.month) for t in times])
+
+# Find indices
+idstart  = np.where(timesmon==start)[0][0]
+idend    = np.where(timesmon==end)[0][0]
+
+# Restrict Data to period
+sla_in     = sla_lp[idstart:idend,:,:]
+timeslim = timesmon[idstart:idend]
+timesyr  = np.array(["%04d"%(t.year) for t in times])[idstart:idend]
+ntimer   = sla_in.shape[0]
+
+timestr = "%s_to_%s" % (start,end)
+timestrtitle = "%s to %s" % (start[:4],end[:4])
+
+# Do Clustering
+clustered,uncert,cluster_count,Wk,s,s_byclust = cluster_ssh(sla_in,lat5,lon5,6,returnall=True,calcsil=True)
+
+
+# Set input data
+inclust = np.array(clustered)
+inuncert = np.array(uncert)
+
+# Adjust classes
+clusterPIC = inclust
+clusterPIC,remapdict = remapcluster(inclust,lat5,lon5,regiondict,returnremap=True)
+#patcorr = calc_cluster_patcorr(clusterPIC,clusterPICALL,returnmax=True)
+new_sbyclust = np.zeros(nclusters)
+for k in remapdict.keys():
+    newclass = remapdict[k] # Class that k was remapped to
+    new_sbyclust[newclass-1] = s_byclust[k-1] # Reassign
+    print("Reassigned new class %i"%newclass)
+
+# Recover clusterout for silhouette plotting
+clusterout,knan,okpts = proc.find_nan(clusterPIC.flatten(),0)
+
+# Plot the silhouette
+fig,ax = plt.subplots(1,1)
+ax = slutil.plot_silhouette(clusterout,nclusters,s,ax1=ax,cmap=regioncolors)
+ax.grid(True,ls='dotted')
+ax.set_title("Silhouette Plot for CESM-PiC Clusters (Year %s) \n Mean Silhouette Coefficient = %.3f" % (timestrtitle,s.mean()))
+# Add dummy legend
+for i in range(nclusters):
+    cid = i+1
+    ax.axvline([-100],lw=5,color=regioncolors[i],label="Cluster %i, s = %.3f"%(cid,new_sbyclust[i]))
+ax.legend(fontsize=10)
+ax.set_xticks(np.arange(-.2,.6,.1))
+ax.set_xlim([-.25,.6])
+plt.savefig("%sCESM1PIC_%s_SilhouettePlot_%s.png"%(outfigpath,expname,timestr),dpi=200,bbox_inches='tight')
+
+# Replace silhouette into full map
+silmap = np.zeros(nlat5*nlon5)*np.nan
+silmap[okpts] = s
+silmap = silmap.reshape(nlat5,nlon5)
+proj = ccrs.PlateCarree(central_longitude=180)
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax     = viz.add_coast_grid(ax)
+pcm=ax.pcolormesh(lon5,lat5,silmap,vmin=-.5,vmax=.5,cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+ax.contour(lon5,lat5,silmap,levels=[0],colors='k',linewidths=0.75,transform=ccrs.PlateCarree())
+#ax.pcolormesh(lon5,lat5,silmap,vmin=-.5,vmax=.5,cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title("Silhouette Values for CESM-PiC Clusters (Year %s) \n $s_{avg}$ = %.3f" % (timestrtitle,s.mean()))
+plt.savefig("%sCESM1PIC_%s_Silhouette_%s.png"%(outfigpath,expname,timestr),dpi=200,bbox_inches='tight')
+
+
+
+# Plot some results (Clusters Themselves)
+proj = ccrs.PlateCarree(central_longitude=180)
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax     = viz.add_coast_grid(ax)
+pcm=ax.pcolormesh(lon5,lat5,clusterPIC,cmap=cmapn,transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title("CESM-PiC Clusters (Year %s)" % (timestrtitle))
+plt.savefig("%sCESM1PIC_%s_Clusters_%s.png"%(outfigpath,expname,timestr),dpi=200,bbox_inches='tight')
+
+
+# Now Plot the Uncertainties
+vlm = [-10,10]
+proj = ccrs.PlateCarree(central_longitude=180)
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax     = viz.add_coast_grid(ax)
+pcm=ax.pcolormesh(lon5,lat5,inuncert,vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title(r"CESM-PIC Cluster Uncertainty $(<\sigma^{2}_{in,x}>/<\sigma^{2}_{out,x}>)$"+" \n (Year %s) " % (timestrtitle))
+plt.savefig("%sCESM1PIC_%s_Uncert_%s_stest.png"%(outfigpath,expname,timestr),dpi=200,bbox_inches='tight')
+
+
+
+
+
+#%% Sections Below are old/under construction
+
+
+
 #%% Perform Clustering
+
+
+
+
 
 allclusters,alluncert,allcount,rempts = elim_points(sla_in,lat5,lon5,nclusters,minpts,maxiter,expdir)
 
