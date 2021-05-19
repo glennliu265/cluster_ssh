@@ -431,7 +431,7 @@ def check_lpfilter(rawdata,lpdata,chkval,M,tw,dt=24*3600*30):
     return lpspec,rawspec,p24,filtxfer,fig,ax
 
 
-def plot_silhouette(clusterout,nclusters,s,cmap=None,ax1=None,xlm=[-.25, 1]):
+def plot_silhouette(clusterout,nclusters,s,cmap=None,ax1=None,xlm=[-.25, 1],returncolor=False):
         """
         Make a silhouette plot
         
@@ -472,7 +472,7 @@ def plot_silhouette(clusterout,nclusters,s,cmap=None,ax1=None,xlm=[-.25, 1]):
         ax1.set_ylim([0, len(clusterout) + (nclusters + 1) * 10])
         
         s_score = s.mean()
-        
+        ccols = []
         # Make a plot, aggregating by cluster
         for i in range(nclusters):
             
@@ -488,8 +488,10 @@ def plot_silhouette(clusterout,nclusters,s,cmap=None,ax1=None,xlm=[-.25, 1]):
             # Geet Colormap
             if cmap is None:
                 color = mcm.nipy_spectral(float(cid) / nclusters)
+                
             else:
                 color = cmap[i]
+            ccols.append(color)
                 
             ax1.fill_betweenx(np.arange(y_lower, y_upper),
                               0, ith_cluster_silhouette_values,
@@ -514,4 +516,7 @@ def plot_silhouette(clusterout,nclusters,s,cmap=None,ax1=None,xlm=[-.25, 1]):
         ax1.set_yticks([])  # Clear the yaxis labels / ticks
         ax1.set_xticks([-0.1, 0, 0.2, 0.4, 0.6, 0.8, 1])
         
+        
+        if returncolor:
+            return ax1,ccols
         return ax1

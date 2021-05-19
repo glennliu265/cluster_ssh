@@ -47,7 +47,7 @@ from statsmodels.regression import linear_model
 
 # Set Paths
 datpath    = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/"
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210309/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210519/"
 
 # Experiment Names
 start       = '1993-01'
@@ -85,7 +85,8 @@ else:
 #%% Functions
 
 def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
-                returnall=False,absmode=0,distmode=0,uncertmode=0):
+                returnall=False,absmode=0,distmode=0,uncertmode=0,printmsg=True,
+                calcsil=False):
     
     # ---------------------------------------------
     # Calculate Correlation, Covariance, and Distance Matrices
@@ -123,6 +124,15 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
     cdist      = squareform(distance_matrix,checks=False)
     linked     = linkage(cdist,'weighted')
     clusterout = fcluster(linked, nclusters,criterion='maxclust')
+    
+    
+    # --------------------
+    # Calculate Silhouette
+    # --------------------
+    if calcsil:
+        s_score,s,s_bycluster = slutil.calc_silhouette(distance_matrix,clusterout,nclusters)
+    # fig,ax = plt.subplots(1,1)
+    # ax = slutil.plot_silhouette(clusterout,nclusters,s,ax1=ax)
     
     # -------------------------
     # Calculate the uncertainty
@@ -170,11 +180,14 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
         cid = i+1
         cnt = (clustered==cid).sum()
         cluster_count.append(cnt)
-        print("Found %i points in cluster %i" % (cnt,cid))
+        if printmsg:
+            print("Found %i points in cluster %i" % (cnt,cid))
     uncert = np.zeros(nlat*nlon)*np.nan
     uncert[okpts] = uncertout
     uncert = uncert.reshape(nlat,nlon)
     
+    if calcsil: # Return silhouette values
+        return clustered,uncert,cluster_count,Wk,s,s_bycluster
     if returnall:
         return clustered,uncert,cluster_count,Wk,srho,scov,sdist,distance_matrix
     return clustered,uncert,cluster_count,Wk
@@ -184,7 +197,6 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
 def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath,title=None):
     
     # Set some defaults
-    
     ucolors = ('Blues','Purples','Greys','Blues','Reds','Oranges','Greens')
     proj = ccrs.PlateCarree(central_longitude=180)
     cmap = cm.get_cmap("jet",nclusters)
@@ -242,7 +254,8 @@ def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath,title=None):
     
 
 def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
-                absmode=0,distmode=0,uncertmode=0):
+                absmode=0,distmode=0,uncertmode=0,viz=True,printmsg=True,
+                calcsil=False):
     
     ntime,nlat,nlon = sla.shape
     slain = sla.copy()
@@ -252,19 +265,32 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
     alluncert   = []
     allcount    = []
     allWk = []
+    if calcsil:
+        alls           = []
+        alls_byclust = []
     rempts      = np.zeros((nlat*nlon))*np.nan
     
     # Loop
     flag = True
     it   = 0
-    while flag or it < maxiter:
+    while flag and it < maxiter:
         
+        if printmsg:
+            print("Iteration %i ========================="%it)
         expname = "iteration%02i" % (it+1)
-        print("Iteration %i ========================="%it)
+        #print("Iteration %i ========================="%it)
         
         # Perform Clustering
-        clustered,uncert,cluster_count,Wk = cluster_ssh(slain,lat,lon,nclusters,distthres=distthres,
-                                                     absmode=absmode,distmode=distmode,uncertmode=uncertmode)
+        clustoutput = cluster_ssh(slain,lat,lon,nclusters,distthres=distthres,
+                                                     absmode=absmode,distmode=distmode,uncertmode=uncertmode,
+                                                     printmsg=printmsg,calcsil=calcsil)
+        
+        if calcsil:
+            clustered,uncert,cluster_count,Wk,s,s_byclust = clustoutput
+            alls.append(s)
+            alls_byclust.append(s_byclust)
+        else:
+            clustered,uncert,cluster_count,Wk = clustoutput
         
         # Save results
         allclusters.append(clustered)
@@ -272,9 +298,10 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
         allcount.append(cluster_count)
         allWk.append(Wk)
         
-        # Visualize Results
-        fig,ax,fig1,ax1 = plot_results(clustered,uncert,expname,lat,lon,outfigpath)
-        
+        if viz:
+            # Visualize Results
+            fig,ax,fig1,ax1 = plot_results(clustered,uncert,expname,lat,lon,outfigpath)
+            
 
         
         # Check cluster counts
@@ -283,6 +310,7 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
             
             flag = False
             if cluster_count[i] < minpts:
+                
                 flag = True # Set flag to continue running
                 print("\tCluster %i (count=%i) will be removed" % (cid,cluster_count[i]))
                 
@@ -294,10 +322,16 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
                 rempts[clusteredrs==cid] = it # Record iteration of removal
                 
                 slain = slainrs.reshape(ntime,nlat,nlon)
+        # if removeflag:
+        #     flag = True
+        # else:
+        #     flag = False
         it += 1
-    
-    print("COMPLETE after %i iterations"%it)
+    if printmsg:
+        print("COMPLETE after %i iterations"%it)
     rempts = rempts.reshape(nlat,nlon)
+    if calcsil:
+        return allclusters,alluncert,allcount,rempts,allWk,alls,alls_byclust
     return allclusters,alluncert,allcount,rempts,allWk
 
 def return_ar1_model(invar,simlen):
@@ -765,16 +799,16 @@ if debug:
 # 1: Absolute Values: Take abs(corr) and abs(cov)
 # 2: Anti: Take -1*corr, -1*cov
 
-varin      = rnlp
+varin      = wnlp
 chardist   = 0
 #snamelong  = "Red Noise (Filtered)"
-snamelong = "Red Noise (Filtered)"
+snamelong  = "Distance Only"
 #snamelong  = "Distance Only"
 #snamelong  = "Characteristic Distance = %i km "% chardist
-expname    = "AVISO_RedNoise_nclusters%i_Filtered_" % (nclusters)
+expname    = "AVISO_DistanceOnly_nclusters%i_Filtered_" % (nclusters)
 #expname    = "AVISO_WhiteNoise_nclusters%i_Filtered_" % (nclusters)
 #expname = "AVISO_WhiteNoise_chardist%i_nclusters%i_Filtered_" % (chardist,nclusters)
-distmode   = 0
+distmode   = 1
 absmode    = 0
 uncertmode = 0
 
@@ -815,12 +849,22 @@ cdist      = squareform(distance_matrix,checks=False)
 linked     = linkage(cdist,'weighted')
 clusterout = fcluster(linked, nclusters,criterion='maxclust')
 
+
+# ----------------------------
+# Calculate Silhouette Metrics
+# ----------------------------
+s_score,s,s_byclust=slutil.calc_silhouette(distance_matrix,clusterout,nclusters)
+
+
 # --------------------------
 # Replace into pull matrix
 # --------------------------
 clustered = np.zeros(nlat*nlon)*np.nan
+silmap    = clustered.copy()
 clustered[okpts] = clusterout
+silmap[okpts] = s
 clustered = clustered.reshape(nlat,nlon)
+silmap = silmap.reshape(nlat,nlon)
 
 # ---------------------
 # Calculate Uncertainty
@@ -844,6 +888,27 @@ title = snamelong
 expname += "_distmode%i_uncertmode_%i_absmode%i" % (distmode,uncertmode,absmode)
 outfigpath = expdir
 plot_results(clustered,uncert,expname,lat5,lon5,outfigpath,title=title)
+
+# ----------------------------------------
+# Make some quick silhouette related plots
+# ----------------------------------------
+#cmap = cm.get_cmap("jet",nclusters)
+fig,ax = plt.subplots(1,1)
+ax,ccol = slutil.plot_silhouette(clusterout,nclusters,s,ax1=ax,returncolor=True)
+ax.grid(True,ls='dotted')
+ax.set_title("Silhouette Plot %s \n Mean Silhouette Coefficient = %.3f" % (snamelong,s.mean()))
+# Add dummy legend
+for i in range(nclusters):
+    cid = i+1
+    ax.axvline([-100],lw=5,color=ccol[i],label="Cluster %i, s = %.3f"%(cid,s_byclust[i]))
+ax.legend(fontsize=10)
+ax.set_xticks(np.arange(-1,1.1,.1))
+ax.set_xlim([-1,1])
+plt.savefig("%sSynthetic_SilhouettePlot_%s.png"%(outfigpath,expname),dpi=200,bbox_inches='tight')
+
+
+
+
 
 # -------------------------------------------------------------
 #%%   Calculate Clusters for particular experiments, for AVISO
