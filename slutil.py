@@ -288,7 +288,7 @@ def calc_silhouette(distance_matrix,clusterout,nclusters):
     
         # Calculate the silhouette for each point
         s       = silhouette_samples(distance_matrix,clusterout,metric='precomputed')
-        print("Calculated from SKlearn is %.3f" % s_score)
+        #print("Calculated from SKlearn is %.3f" % s_score)
         
         # Calculate s for each cluster
         s_cluster = np.zeros(nclusters)
@@ -520,3 +520,248 @@ def plot_silhouette(clusterout,nclusters,s,cmap=None,ax1=None,xlm=[-.25, 1],retu
         if returncolor:
             return ax1,ccols
         return ax1
+    
+#
+#%% Clustering, main scripts
+#
+def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
+                returnall=False,absmode=0,distmode=0,uncertmode=0,printmsg=True,
+                calcsil=False):
+    
+    # ---------------------------------------------
+    # Calculate Correlation, Covariance, and Distance Matrices
+    # ---------------------------------------------
+    ntime,nlat,nlon = sla.shape
+    srho,scov,sdist,okdata,okpts,coords2=calc_matrices(sla,lon5,lat5,return_all=True)
+    #npts = okdata.shape[1]
+    
+    # -------------------------------
+    # Apply corrections based on mode
+    # -------------------------------
+    if absmode == 1: # Take Absolute Value of Correlation/Covariance
+        scov = np.abs(scov)
+        srho = np.abs(srho)
+    elif absmode == 2: # Use Anticorrelation, etc
+        scov *= -1
+        srho *= -1
+    
+    # --------------------------
+    # Combine the Matrices
+    # --------------------------
+    a_fac = np.sqrt(-distthres/(2*np.log(0.5))) # Calcuate so exp=0.5 when distance is 3000km
+    expterm = np.exp(-sdist/(2*a_fac**2))
+    
+    if distmode == 0: # Include distance and correlation
+        distance_matrix = 1-expterm*srho
+    elif distmode == 1: # Just Include distance
+        distance_matrix = 1-expterm
+    elif distmode == 2: # Just Include correlation
+        distance_matrix = 1-srho
+    
+    # --------------------------
+    # Do Clustering (scipy)
+    # --------------------------
+    cdist      = squareform(distance_matrix,checks=False)
+    linked     = linkage(cdist,'weighted')
+    clusterout = fcluster(linked, nclusters,criterion='maxclust')
+    
+    
+    # --------------------
+    # Calculate Silhouette
+    # --------------------
+    if calcsil:
+        s_score,s,s_bycluster = calc_silhouette(distance_matrix,clusterout,nclusters)
+    # fig,ax = plt.subplots(1,1)
+    # ax = slutil.plot_silhouette(clusterout,nclusters,s,ax1=ax)
+    
+    # -------------------------
+    # Calculate the uncertainty
+    # -------------------------
+    uncertout = np.zeros(clusterout.shape)
+    for i in range(len(clusterout)):
+        covpt     = scov[i,:]     # 
+        cid       = clusterout[i] #
+        covin     = covpt[np.where(clusterout==cid)]
+        covout    = covpt[np.where(clusterout!=cid)]
+        
+        if uncertmode == 0:
+            uncertout[i] = np.mean(covin)/np.mean(covout)
+        elif uncertmode == 1:
+            uncertout[i] = np.median(covin)/np.median(covout)
+
+    # Apply rules from Thompson and Merrifield (Do this later)
+    # if uncert > 2, set to 2
+    # if uncert <0.5, set to 0
+    #uncertout[uncertout>2]   = 2
+    #uncertout[uncertout<0.5] = 0 
+    
+    # ------------------------------
+    # Calculate Wk for gap statistic
+    # ------------------------------
+    Wk = np.zeros(nclusters)
+    for i in range(nclusters):
+        
+        cid = i+1
+        ids = np.where(clusterout==cid)[0]
+        dist_in = distance_matrix[ids[:,None],ids[None,:]] # Get Pairwise Distances within cluster
+        dist_in = dist_in.sum()/2 # Sum and divide by 2 (since pairs are replicated)
+        
+        Wk[i] = dist_in
+    
+    
+    # -----------------------
+    # Replace into full array
+    # -----------------------
+    clustered = np.zeros(nlat*nlon)*np.nan
+    clustered[okpts] = clusterout
+    clustered = clustered.reshape(nlat,nlon)
+    cluster_count = []
+    for i in range(nclusters):
+        cid = i+1
+        cnt = (clustered==cid).sum()
+        cluster_count.append(cnt)
+        if printmsg:
+            print("Found %i points in cluster %i" % (cnt,cid))
+    uncert = np.zeros(nlat*nlon)*np.nan
+    uncert[okpts] = uncertout
+    uncert = uncert.reshape(nlat,nlon)
+    
+    if calcsil: # Return silhouette values
+        return clustered,uncert,cluster_count,Wk,s,s_bycluster
+    if returnall:
+        return clustered,uncert,cluster_count,Wk,srho,scov,sdist,distance_matrix
+    return clustered,uncert,cluster_count,Wk
+
+def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath,nclusters):
+    
+    # Set some defaults
+    
+    ucolors = ('Blues','Purples','Greys','Blues','Reds','Oranges','Greens')
+    proj = ccrs.PlateCarree(central_longitude=180)
+    cmap = cm.get_cmap("jet",nclusters)
+    
+    fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    ax = add_coast_grid(ax)
+    gl = ax.gridlines(ccrs.PlateCarree(central_longitude=0),draw_labels=True,
+                  linewidth=2, color='gray', alpha=0.5, linestyle="dotted",lw=0.75)
+    gl.xlabels_top = False
+    gl.ylabels_right = False
+    pcm = ax.pcolormesh(lon5,lat5,clustered,cmap=cmap,transform=ccrs.PlateCarree())#,cmap='Accent')#@,cmap='Accent')
+    plt.colorbar(pcm,ax=ax,orientation='horizontal')
+    ax.set_title("Clustering Results \n nclusters=%i %s" % (nclusters,expname))
+    plt.savefig("%sCluster_results_n%i_%s.png"%(outfigpath,nclusters,expname),dpi=200,transparent=True)
+    
+    # Plot raw uncertainty
+    fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    ax     = add_coast_grid(ax)
+    pcm    = plt.pcolormesh(lon5,lat5,uncert,cmap='copper',transform=ccrs.PlateCarree())
+    ax.set_title(r"Uncertainty $(<\sigma^{2}_{out,x}>/<\sigma^{2}_{in,x}>)$")
+    fig.colorbar(pcm,ax=ax,fraction=0.02)
+    plt.savefig(outfigpath+"Uncertainty.png",dpi=200)
+    
+    
+    # Apply Thompson and Merrifield thresholds
+    uncert[uncert>2] = 2
+    uncert[uncert<0.5]=0
+    
+    # Plot Cluster Uncertainty
+    fig1,ax1 = plt.subplots(1,1,subplot_kw={'projection':proj})
+    ax1 = add_coast_grid(ax1)
+    for i in range(nclusters):
+        cid = i+1
+        if (i+1) > len(ucolors):
+            ci=i%len(ucolors)
+        else:
+            ci=i
+        cuncert = uncert.copy()
+        cuncert[clustered!=cid] *= np.nan
+        ax1.pcolormesh(lon5,lat5,cuncert,vmin=0,vmax=2,cmap=ucolors[ci],transform=ccrs.PlateCarree())
+        #fig.colorbar(pcm,ax=ax)
+    ax1.set_title("Clustering Output (nclusters=%i) %s "% (nclusters,expname))
+    plt.savefig(outfigpath+"Cluster_with_Shaded_uncertainties_%s.png" % expname,dpi=200)
+
+    
+    return fig,ax,fig1,ax1
+    
+
+def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
+                absmode=0,distmode=0,uncertmode=0,viz=True,printmsg=True,
+                calcsil=False):
+    
+    ntime,nlat,nlon = sla.shape
+    slain = sla.copy()
+    
+    # Preallocate
+    allclusters = []
+    alluncert   = []
+    allcount    = []
+    allWk = []
+    if calcsil:
+        alls           = []
+        alls_byclust = []
+    rempts      = np.zeros((nlat*nlon))*np.nan
+    
+    # Loop
+    flag = True
+    it   = 0
+    while flag and it < maxiter:
+        
+        if printmsg:
+            print("Iteration %i ========================="%it)
+        expname = "iteration%02i" % (it+1)
+        #print("Iteration %i ========================="%it)
+        
+        # Perform Clustering
+        clustoutput = cluster_ssh(slain,lat,lon,nclusters,distthres=distthres,
+                                                     absmode=absmode,distmode=distmode,uncertmode=uncertmode,
+                                                     printmsg=printmsg,calcsil=calcsil)
+        
+        if calcsil:
+            clustered,uncert,cluster_count,Wk,s,s_byclust = clustoutput
+            alls.append(s)
+            alls_byclust.append(s_byclust)
+        else:
+            clustered,uncert,cluster_count,Wk = clustoutput
+        
+        # Save results
+        allclusters.append(clustered)
+        alluncert.append(uncert)
+        allcount.append(cluster_count)
+        allWk.append(Wk)
+        
+        if viz:
+            # Visualize Results
+            fig,ax,fig1,ax1 = plot_results(clustered,uncert,expname,lat,lon,outfigpath,nclusters)
+            
+
+        
+        # Check cluster counts
+        for i in range(nclusters):
+            cid = i+1
+            
+            flag = False
+            if cluster_count[i] < minpts:
+                
+                flag = True # Set flag to continue running
+                print("\tCluster %i (count=%i) will be removed" % (cid,cluster_count[i]))
+                
+                clusteredrs = clustered.reshape(nlat*nlon)
+                slainrs = slain.reshape(ntime,nlat*nlon)
+                
+                
+                slainrs[:,clusteredrs==cid] = np.nan # Assign NaN Values
+                rempts[clusteredrs==cid] = it # Record iteration of removal
+                
+                slain = slainrs.reshape(ntime,nlat,nlon)
+        # if removeflag:
+        #     flag = True
+        # else:
+        #     flag = False
+        it += 1
+    if printmsg:
+        print("COMPLETE after %i iterations"%it)
+    rempts = rempts.reshape(nlat,nlon)
+    if calcsil:
+        return allclusters,alluncert,allcount,rempts,allWk,alls,alls_byclust
+    return allclusters,alluncert,allcount,rempts,allWk
+

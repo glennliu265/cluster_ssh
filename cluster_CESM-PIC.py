@@ -418,15 +418,15 @@ else:
 # Convert Datestrings
 timesmon = np.array(["%04d-%02d"%(t.year,t.month) for t in times])
 
-# Find indices
-idstart  = np.where(timesmon==start)[0][0]
-idend    = np.where(timesmon==end)[0][0]
+# # Find indices
+# idstart  = np.where(timesmon==start)[0][0]
+# idend    = np.where(timesmon==end)[0][0]
 
-# Restrict Data to period
-ssh     = ssh[idstart:idend,:,:]
-timeslim = timesmon[idstart:idend]
-timesyr  = np.array(["%04d"%(t.year) for t in times])[idstart:idend]
-ntimer   = ssh.shape[0]
+# # Restrict Data to period
+# ssh     = ssh[idstart:idend,:,:]
+# timeslim = timesmon[idstart:idend]
+# timesyr  = np.array(["%04d"%(t.year) for t in times])[idstart:idend]
+# ntimer   = ssh.shape[0]
 
 # # -------------------------
 # # Remove the Long Term Mean
@@ -556,34 +556,50 @@ maxiter = 6
 # Get ranges for sliding window
 winsize = 240
 #rngs = []
-clusters  = []
-uncerts   = []
-counts    = []
-rempts    = []
-Wks       = []
+clusters   = []
+uncerts    = []
+counts     = []
+rempts     = []
+Wks        = []
+s_all      = []
+s_by_clust = []
 for i in tqdm(range(ntime-240)):
     rng = np.arange(i,i+winsize+1)
     sla_in = sla_lp[rng,:,:]
     
-    allclusters,alluncert,allcount,rempt,allWk = elim_points(sla_in,lat5,lon5,nclusters,minpts,maxiter,expdir,
-                                                             viz=False,printmsg=False)
+    #allclusters,alluncert,allcount,rempt,allWk = elim_points(sla_in,lat5,lon5,nclusters,minpts,maxiter,expdir,
+    #                                                         viz=False,printmsg=False)
     
-    clusters.append(allclusters)
-    uncerts.append(alluncert)
-    counts.append(allcount)
-    rempts.append(rempt)
-    Wks.append(allWk)
     
+    allclusters,alluncert,allcount,rempt,allWk,alls,alls_byclust = elim_points(sla_in,lat5,lon5,nclusters,minpts,maxiter,expdir,
+                                                             viz=False,printmsg=False,calcsil=True)
+    
+    
+    clusters.append(np.array(allclusters[-1])) # Save, and just take the final result # [niter x nlat x nlon]
+    uncerts.append(np.array(alluncert[-1]))    # [niter x nlat x nlon]
+    counts.append(np.array(allcount[-1]))      # [niter x nclusters]
+    rempts.append(np.array(rempt))             # [lat x lon]
+    Wks.append(np.array(allWk))                # [niter x nclusters]
+    s_all.append(np.array(alls[-1]))           # [niter x nanpts]
+    s_by_clust.append(alls_byclust[-1])        # [niter x ncluster]
+    
+    # End loop
+
+# Make everything to arrays
+
+
 
 np.savez("%s%s_Results_winsize%i.npz"%(datpath,expname,winsize),**{
     'lon':lon5,
     'lat':lat5,
     'sla':sla_lp,
     'clusters':clusters,
-    'uncert':np.array(uncerts),
-    'count':np.array(counts),
-    'rempts':np.array(rempts),
-    'Wks':np.array(Wks)},allow_pickle=True)
+    'uncert':uncerts,
+    'count':counts,
+    'rempts':rempts,
+    'Wks':Wks,
+    's_all':s_all,
+    's_by_clust':s_by_clust},allow_pickle=True)
 
 test = clusters[0]
 
@@ -801,12 +817,6 @@ patterncorr(map2,map1)
 
 # Testing patcorr iteratively 
 patcorr = calc_cluster_patcorr(inclust,clusternew,returnmax=True)
-    
-
-
-
-
-
 
 """
 Some Notes
@@ -1092,31 +1102,3 @@ plt.savefig("%sCESM1PIC_%s_Uncert_%s_stest.png"%(outfigpath,expname,timestr),dpi
 
 
 #%% Sections Below are old/under construction
-
-
-
-#%% Perform Clustering
-
-
-
-
-
-allclusters,alluncert,allcount,rempts = elim_points(sla_in,lat5,lon5,nclusters,minpts,maxiter,expdir)
-
-np.savez("%s%s_Results.npz"%(datpath,expname),**{
-    'lon':lon5,
-    'lat':lat5,
-    'sla':sla_lp,
-    'clusters':allclusters,
-    'uncert':alluncert,
-    'count':allcount,
-    'rempts':rempts},allow_pickle=True)
-
-cmap2  = cm.get_cmap("jet",len(allcount)+1)
-fig,ax = plt.subplots(1,1,subplot_kw={'projection':ccrs.PlateCarree(central_longitude=180)})
-ax     = slutil.add_coast_grid(ax)
-pcm    = ax.pcolormesh(lon5,lat5,rempts,cmap=cmap2,transform=ccrs.PlateCarree())
-fig.colorbar(pcm,ax=ax)
-ax.set_title("Removed Points")
-plt.savefig("%sRemovedPoints_by_Iteration.png" % (expdir),dpi=200)
-plt.pcolormesh(lon5,lat5,rempts)
