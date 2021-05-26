@@ -11,37 +11,35 @@ Created on Sun Mar 14 21:51:31 2021
 
 from scipy.ndimage import gaussian_filter
 
-
 import matplotlib.pyplot as plt
 import matplotlib.cm as mcm
 import xarray as xr
 import numpy as np
-
-import pygmt
-from tqdm import tqdm
-
-import glob
-import time
-import cmocean
-import time
-#import tqdm
-import sys
-sys.path.append("/Users/gliu/Downloads/02_Research/01_Projects/01_AMV/00_Commons/03_Scripts/")
-from amv import proc,viz
-import yo_box as ybx
-import tbx
-from scipy.signal import butter, lfilter, freqz, filtfilt, detrend
-
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-from pylab import cm
 
+from tqdm import tqdm
+from pylab import cm
 
 from sklearn.metrics.pairwise import haversine_distances
 from sklearn.metrics import silhouette_score,silhouette_samples
 from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
 from scipy.spatial.distance import squareform
+from scipy.signal import butter, lfilter, freqz, filtfilt, detrend
 
+import pygmt
+import itertools
+import glob
+import time
+import cmocean
+import time
+import sys
+
+# Custom Scripts
+sys.path.append("/Users/gliu/Downloads/02_Research/01_Projects/01_AMV/00_Commons/03_Scripts/")
+from amv import proc,viz
+import yo_box as ybx
+import tbx
 
 # ----------------
 # %% Preprocessing
@@ -521,9 +519,139 @@ def plot_silhouette(clusterout,nclusters,s,cmap=None,ax1=None,xlm=[-.25, 1],retu
             return ax1,ccols
         return ax1
     
+    
 #
+# %% Clustering Analysis
+#
+
+def patterncorr(map1,map2):
+    # From Taylor 2001,Eqn. 1, Ignore Area Weights
+    # Calculate pattern correation between two 2d variables (lat x lon)
+    
+    
+    # Get Non NaN values, Flatten, Array Size
+    map1ok = map1.copy()
+    map1ok = map1ok[~np.isnan(map1ok)].flatten()
+    map2ok = map2.copy()
+    map2ok = map2ok[~np.isnan(map2ok)].flatten()
+    N = len(map1ok)
+    
+    # Anomalize
+    map1a = map1ok - map1ok.mean()
+    map2a = map2ok - map2ok.mean()
+    std1  = np.std(map1ok)
+    std2  = np.std(map2ok)
+    
+    # calculate
+    R = 1/N*np.sum(map1a*map2a)/(std1*std2)
+    return R
+
+
+def calc_cluster_patcorr(inclust,evalclust,oldclass=None,returnmax=True):
+    
+    if oldclass is None:
+        oldclass = [1,2,3,4,5,6]
+    
+    # Make all possible permutations of classes
+    pms = list(itertools.permutations(oldclass))
+    
+    # Loop through each permutation
+    patcor = []
+    for newclass in tqdm(pms):
+        # Make Remapping Dictionary
+        mapdict  = make_mapdict(oldclass,newclass)
+        # Remap the Target Cluster
+        remapclust = reassign_classes(evalclust,mapdict,printmsg=False)
+        # Calculate Pattern Correlation and save
+        pc = patterncorr(remapclust,inclust)
+        patcor.append(pc)
+    patcor = np.array(patcor)
+    if returnmax:
+        return np.nanmax(patcor)
+    return patcor
+
+def remapcluster(inclust,lat5,lon5,regiondict,printmsg=True,returnremap=False):
+    
+    # Remap an input cluster [inclust] according
+    # to a regiondict.
+    # Searches within each region and assigns
+    # value to most frequent class in a given region
+    
+    nlat,nlon = inclust.shape
+    clusternew = inclust.copy()
+    clusternewflat = clusternew.flatten()
+    clusteroldflat = inclust.flatten()
+    assigned = []
+    remapdict = {}
+    for r in regiondict.keys():
+        #print(r)
+        # Get Region
+        bbox = regiondict[r].copy()
+        for i in range(2): # Just check Longitudes
+            if bbox[i] < 0:
+                bbox[i]+=360
+        varr,lonr,latr,=proc.sel_region(inclust.T,lon5,lat5,bbox,warn=printmsg)
+        
+        
+        # Get rid of NaNs
+        varrok = varr.flatten().copy()
+        varrok = varrok[~np.isnan(varrok)]
+        
+        # Get unique elements and counts, sort by count
+        eles,freqs = np.unique(varrok,return_counts=True)
+        sortid = np.argsort(freqs)[::-1]
+        eles = eles[sortid]
+        done=False
+        for ele in eles:
+            if done: # Skip if already assigned
+                continue
+            if ele in assigned: # Skip if class has already be reassigned
+                continue
+            
+            # Assign new cluster
+            clusternewflat[clusteroldflat==ele] = r
+            if printmsg:
+                print("Reassigned Class %i to %i" % (ele,r))
+            assigned.append(int(ele))
+            remapdict[int(ele)] = r
+            done=True
+        
+        if done is False: # When no cluster is assigned...
+            # Get unassigned regions, and assign first one
+            unassigned = np.setdiff1d(list(regiondict.keys()),assigned)
+            ele = unassigned[0]
+            clusternewflat[clusteroldflat==ele] = r
+            assigned.append(int(ele))
+            remapdict[int(ele)] = r
+            if printmsg:
+                print("Reassigned (Leftover) Class %i to %i because nothing was found" % (ele,r))
+    clusternew = clusternewflat.reshape(nlat,nlon)
+    if returnremap:
+        return clusternew,remapdict
+    return clusternew
+
+def make_mapdict(oldclass,newclass):
+    mapdict = {oldclass[i] : newclass[i] for i in range(len(oldclass))}
+    return mapdict
+
+
+def reassign_classes(inclust,mapdict,printmsg=True):
+    
+    nlat,nlon = inclust.shape
+    clusternew = inclust.copy()
+    clusternewflat = clusternew.flatten()
+    clusteroldflat = inclust.flatten()
+    
+    for i in mapdict.keys():
+        newclass = mapdict[i]
+        clusternewflat[clusteroldflat==i] = newclass
+        if printmsg:
+            print("Reassigned Class %i to %i "%(i,newclass))
+    return clusternewflat.reshape(nlat,nlon)
+
+# --------------------------
 #%% Clustering, main scripts
-#
+# --------------------------
 def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
                 returnall=False,absmode=0,distmode=0,uncertmode=0,printmsg=True,
                 calcsil=False):
@@ -532,7 +660,7 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
     # Calculate Correlation, Covariance, and Distance Matrices
     # ---------------------------------------------
     ntime,nlat,nlon = sla.shape
-    srho,scov,sdist,okdata,okpts,coords2=calc_matrices(sla,lon5,lat5,return_all=True)
+    srho,scov,sdist,okdata,okpts,coords2=calc_matrices(sla,lon,lat,return_all=True)
     #npts = okdata.shape[1]
     
     # -------------------------------
