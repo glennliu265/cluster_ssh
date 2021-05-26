@@ -279,3 +279,8 @@ np.savez("%s%s_Results_winsize%i.npz"%(datpath,expname,winsize),**{
     's_all':s_all,
     's_by_clust':s_by_clust,
     'rngs':rngs},allow_pickle=True)
+
+
+#%%
+
+
