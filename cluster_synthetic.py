@@ -47,7 +47,7 @@ from statsmodels.regression import linear_model
 
 # Set Paths
 datpath    = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/"
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210519/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210603/"
 
 # Experiment Names
 start       = '1993-01'
@@ -73,7 +73,7 @@ print(expname)
 
 #Make Folders
 #expdir = outfigpath+expname +"/"
-expdir = outfigpath+"../20210428/"
+expdir = outfigpath+"../20210603/"
 checkdir = os.path.isdir(expdir)
 if not checkdir:
     print(expdir + " Not Found!")
@@ -658,6 +658,10 @@ ax.set_title("Characteristic Timescale in Months \n 2-Sided T-Test (p=%.2f)"%p)
 fig.colorbar(pcm,ax=ax,fraction=0.03)
 plt.savefig("%sTimescale_Ttest.png"%(expdir),dpi=150)
 
+#
+#% Plot AR1 Coefficients
+#
+
 
 
 #
@@ -726,11 +730,42 @@ aviso_std = sla_lp.std(0)
 wnstd = wn.copy()
 wnstd *= aviso_std[None,:,:]
 
-
-
-
 # Make red noise timeseries
 rnstd,ar1m,neffm = return_ar1_model(ssha,simlen)
+
+#
+# % Plot AR1 Map ----------
+#
+p            = 0.01
+tails        = 2
+ptilde       = p/tails
+critval      = stats.t.ppf(1-ptilde,neffm)
+corrthres    = np.sqrt(1/ ((neffm/np.power(critval,2))+1))
+
+proj         = ccrs.PlateCarree(central_longitude=180) 
+vlm          = [0,1]
+
+sig = np.zeros(ar1m.shape)*np.nan
+sig[ar1m>corrthres] = 1
+#sig = ar1m > corrthres
+
+xx,yy = np.meshgrid(lon5,lat5)
+
+# Plot things
+fig,axs = plt.subplots(1,1,subplot_kw={'projection':proj},figsize=(6,4))
+# Plot AR1 Map
+ax = axs
+ax     = viz.add_coast_grid(ax)
+pcm    = ax.pcolormesh(lon5,lat5,ar1m,vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.thermal,transform=ccrs.PlateCarree())
+#pcm    = ax.pcolormesh(lon5,lat5,ar1m>corrthres,vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.thermal,transform=ccrs.PlateCarree())
+#ax.scatter(xx*sig,yy*sig,s=.5,color='k',marker=".",transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title("SSH Lag 1 Autocorrelation")
+plt.savefig("%s%s_AR1map.png"%(expdir,expname),dpi=200,bbox_inches='tight')
+
+
+
+
 
 # Select the last n points (match sample size of aviso)
 wnstd = wnstd[-ntime:,:,:]
