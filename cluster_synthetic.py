@@ -369,7 +369,7 @@ def return_ar1_model(invar,simlen):
     # Compute Lag 1 AR for each and effective DOF
     ar1  = np.zeros(nok)
     neff = np.zeros(nok) 
-    for i in tqdm(range(nok)):
+    for i in range(nok):
         
         ts = okdata[:,i]
         r = np.corrcoef(ts[1:],ts[:-1])[0,1]
@@ -408,7 +408,7 @@ def return_ar1_model(invar,simlen):
     rednoisemodel*=msk[None,:,:]
     
     vardiff = (np.var(invar,0)) - np.var(rednoisemodel,0)
-    print("maximum difference in variance is %f"% np.nanmax(np.abs(vardiff)))
+    #print("maximum difference in variance is %f"% np.nanmax(np.abs(vardiff)))
     return rednoisemodel,ar1_map,neff_map
 
 #%%
@@ -713,6 +713,100 @@ rawdata = ssha.reshape(ntimer,nlat5*nlon5)[:,okpts]
 lpspec,rawspec,p24,filtxfer,fig,ax=slutil.check_lpfilter(rawdata,lpdata,xtk[1],M,tw,dt=24*3600*30)
 plt.savefig("%sFilter_Transfer_%imonLP_%ibandavg_%s.png"%(expdir,tw,M,expname),dpi=200)
 
+
+
+#%% Write some functions to bootstrap the results
+
+def bootstrap_ssh(ssha,niter,tw,order,simlen=10000):
+    """
+    Generate [niter] white and red noise maps,
+    then passes a low-pass filter through them
+
+    Parameters
+    ----------
+    ssha : ARRAY[time x lat x lon]
+        SSH anomalies
+    niter : INT
+        # of white noise timeseries to generate
+    tw : INT
+        Low pass filter cutoff time window
+    order : INT
+        Order of the low-pass filter
+    simlen : INT, optional
+        Total length of generated wn timeseries (before truncation). The default is 10000.
+
+    Returns
+    -------
+    wnout : ARRAY [niter x time x lat x lon]
+        White Noise Maps
+    rnout : ARRAY [niter x time x lat x lon]
+        Red Noise Maps
+    ar1m : [lat x lon]
+        AR1 Coefficients
+    neffm : [lat x lon]
+        Effective DOF
+    """
+    
+    
+    # Get Dimensions
+    ntime,nlat,nlon = ssha.shape
+    
+    # Make land/ice mask
+    msk = ssha.copy()
+    msk = msk.sum(0)
+    msk[~np.isnan(msk)] = 1
+    
+    # Calculate Stdev
+    aviso_std = ssha.std(0)
+    
+    # Preallocate
+    wnout = np.zeros((niter,ntime,nlat,nlon)) * np.nan
+    rnout = np.zeros((niter,ntime,nlat,nlon)) * np.nan
+    
+    # Loop for each interation
+    for it in tqdm(range(niter)):
+    
+        # Create white noise timeseries
+        wn = np.random.normal(0,1,(simlen,nlat5,nlon5))
+        wn *= msk[None,:,:]
+        
+        # Create scaled form of timeseries
+        wnstd     = wn.copy()
+        wnstd     *= aviso_std[None,:,:]
+    
+        # Get stddev and AR1 for red noise timeseries
+        rnstd,ar1m,neffm = return_ar1_model(ssha,simlen)
+
+        # Select the last n points (match sample size of aviso)
+        wnstd = wnstd[-ntime:,:,:]
+        rnstd = rnstd[-ntime:,:,:]
+        
+        # Low Pass Filter The Timeseries
+        wnlp = slutil.lp_butter(wnstd,tw,order)
+        rnlp = slutil.lp_butter(rnstd,tw,order)
+        
+        # Apply Save the results
+        wnout[it,...] = wnlp
+        rnout[it,...] = rnlp
+    
+    return wnout,rnout,ar1m,neffm
+    
+
+#%% Make synthetic timeseries
+
+simlen = 5000
+sshin  = ssha
+niter  = 1000
+wnout,rnout,ar1m,neffm = bootstrap_ssh(sshin,niter,tw,order,simlen=simlen)
+
+
+
+
+
+
+
+
+
 #%% Make Synthetic timeseries
 
 simlen = 10000
@@ -762,9 +856,6 @@ pcm    = ax.pcolormesh(lon5,lat5,ar1m,vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.t
 fig.colorbar(pcm,ax=ax,fraction=0.025)
 ax.set_title("SSH Lag 1 Autocorrelation")
 plt.savefig("%s%s_AR1map.png"%(expdir,expname),dpi=200,bbox_inches='tight')
-
-
-
 
 
 # Select the last n points (match sample size of aviso)
