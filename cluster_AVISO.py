@@ -43,7 +43,7 @@ import tbx
 
 # Set Paths
 datpath    = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/"
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210309/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210603/"
 
 # Experiment Names
 start       = '1993-01'
@@ -183,6 +183,7 @@ def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath):
     ax.set_title(r"Uncertainty $(<\sigma^{2}_{out,x}>/<\sigma^{2}_{in,x}>)$")
     fig.colorbar(pcm,ax=ax,fraction=0.02)
     plt.savefig(outfigpath+"Uncertainty.png",dpi=200)
+    uncertraw = uncert.copy()
     
     # Apply Thompson and Merrifield thresholds
     uncert[uncert>2] = 2
@@ -231,13 +232,15 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000):
         # Perform Clustering
         clustered,uncert,cluster_count = cluster_ssh(slain,lat,lon,nclusters,distthres=distthres)
         
-        # Visualize Results
-        fig,ax,fig1,ax1 = plot_results(clustered,uncert,expname,lat,lon,outfigpath)
-        
         # Save results
         allclusters.append(clustered)
         alluncert.append(uncert)
         allcount.append(cluster_count)
+        
+        # Visualize Results
+        fig,ax,fig1,ax1 = plot_results(clustered,uncert,expname,lat,lon,outfigpath)
+        
+
         
         # Check cluster counts
         for i in range(nclusters):
@@ -267,12 +270,12 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000):
 #%% Load in the dataset
 
 # Load data (preproc, then anomalized)
-st=time.time()
-ld = np.load("%sSSHA_AVISO_%sto%s.npz" % (datpath,start,end),allow_pickle=True)
+st       = time.time()
+ld       = np.load("%sSSHA_AVISO_%sto%s.npz" % (datpath,start,end),allow_pickle=True)
 sla_5deg = ld['sla_5deg']
-lon5 = ld['lon']
-lat5 = ld['lat']
-times = ld['times']
+lon5     = ld['lon']
+lat5     = ld['lat']
+times    = ld['times']
 print("Loaded data in %.2fs"%(time.time()-st))
 
 # Plotting utilities
@@ -295,8 +298,6 @@ ssha = sla_5deg[idstart:idend,:,:]
 timeslim = timesmon[idstart:idend]
 timesyr  = np.datetime_as_string(times,unit="Y")[idstart:idend]
 ntimer,nlat5,nlon5   = ssha.shape
-
-
 
 # ------------------
 # Remove GMSL Signal
@@ -378,22 +379,129 @@ if savesteps: # Save low-pass-filtered result, right before clustering
         })
 #%% Perform Clustering
 
-allclusters,alluncert,allcount,rempts = elim_points(sla_lp,lat5,lon5,nclusters,minpts,maxiter,expdir)
+allclusters,alluncert,allcount,remptsall,Wk,alls,alls_byclust = slutil.elim_points(sla_lp,lat5,lon5,
+                                                                                   nclusters,minpts,maxiter,expdir,calcsil=True)
 
-np.savez("%s%s_Results.npz"%(datpath,expname),**{
-    'lon':lon5,
-    'lat':lat5,
-    'sla':sla_lp,
-    'clusters':allclusters,
-    'uncert':alluncert,
-    'count':allcount,
-    'rempts':rempts},allow_pickle=True)
 
-cmap2  = cm.get_cmap("jet",len(allcount)+1)
-fig,ax = plt.subplots(1,1,subplot_kw={'projection':ccrs.PlateCarree(central_longitude=180)})
-ax     = slutil.add_coast_grid(ax)
-pcm    = ax.pcolormesh(lon5,lat5,rempts,cmap=cmap2,transform=ccrs.PlateCarree())
-fig.colorbar(pcm,ax=ax)
-ax.set_title("Removed Points")
-plt.savefig("%sRemovedPoints_by_Iteration.png" % (expdir),dpi=200)
-plt.pcolormesh(lon5,lat5,rempts)
+#%% Make Clustering Map
+
+
+
+# Dictionary of Bounding Boxes to search thru
+# Inputs
+clusterin = allclusters[-1]
+uncertin = alluncert[-1]
+rempts = remptsall
+vlm = [-10,10]
+nclusters = 6
+
+sameplot=True
+
+# Make Region Colors
+cmapn,regiondict = slutil.get_regions()
+
+# rempts = rempts.flatten()
+# rempts[~np.isnan(rempts)] = 1
+# rempts = rempts.reshape(nlat5,nlon5)
+
+proj = ccrs.PlateCarree(central_longitude=180)
+
+# Rearrange clustering number
+clusternew,remapdict = slutil.remapcluster(clusterin,lat5,lon5,regiondict,returnremap=True)
+
+
+# -------------
+# Plot Clusters
+# -------------
+if sameplot:
+    fig,axs = plt.subplots(1,2,subplot_kw={'projection':proj},figsize=(12,4))
+    ax = axs[0]
+else:
+    fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax     = viz.add_coast_grid(ax)
+pcm    = ax.pcolormesh(lon5,lat5,clusternew,cmap=cmapn,transform=ccrs.PlateCarree())
+#ax.pcolor(lon5,lat5,rempts,cmap='Greys',transform=ccrs.PlateCarree(),hatch=":")
+for o in range(nlon5):
+    for a in range(nlat5):
+        pt = rempts[a,o]
+        if np.isnan(pt):
+            continue
+        else:
+            ax.scatter(lon5[o],lat5[a],s=10,marker="x",color="k",transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title("AVISO Clusters (%s to %s)"%(start,end))
+if sameplot:
+    ax = axs[1]
+else:
+    plt.savefig("%s%s_ClustersMap.png"%(expdir,expname),dpi=200,bbox_inches='tight')
+    fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+# ------------------
+# Plot Uncertainties
+# ------------------
+ax     = viz.add_coast_grid(ax)
+pcm=ax.pcolormesh(lon5,lat5,uncertin,vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+#cl = ax.contour(lon5,lat5,clusternew,levels=np.arange(0,nclusters+2),colors='k',transform=ccrs.PlateCarree())
+
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title(r"AVISO Cluster Uncertainty $(<\sigma^{2}_{x,in}>/<\sigma^{2}_{x,out}>)$")
+
+if sameplot:
+    plt.savefig("%s%s_Cluster_and_Uncert.png"%(expdir,expname),dpi=200,bbox_inches='tight')
+else:
+    plt.savefig("%s%s_ClustersUncert.png"%(expdir,expname),dpi=200,bbox_inches='tight')
+
+
+
+#%%
+
+
+
+
+
+# # Set some defaults
+# ucolors = ('Reds','Greys','Blues','Reds','Oranges','Greens')
+# proj = ccrs.PlateCarree(central_longitude=180)
+# cmap = cm.get_cmap("jet",nclusters)
+
+
+#  # Plot Cluster Uncertainty
+# fig1,ax1 = plt.subplots(1,1,subplot_kw={'projection':proj})
+# ax1 = slutil.add_coast_grid(ax1)
+# for i in range(nclusters):
+#     cid = i+1
+#     if (i+1) > len(ucolors):
+#         ci=i%len(ucolors)
+#     else:
+#         ci=i
+#     cuncert = uncert.copy()
+#     cuncert[clusternew!=cid] *= np.nan
+#     ax1.pcolormesh(lon5,lat5,cuncert,vmin=0,vmax=2,cmap=ucolors[ci],transform=ccrs.PlateCarree())
+#     #fig.colorbar(pcm,ax=ax)
+# ax1.set_title("Clustering Output (nclusters=%i) "% (nclusters))
+# plt.savefig(outfigpath+"Cluster_with_Shaded_uncertainties_%s.png" % expname,dpi=200)
+
+    
+
+
+
+
+#plt.pcolormesh(allclusters[0])
+
+
+# np.savez("%s%s_Results.npz"%(datpath,expname),**{
+#     'lon':lon5,
+#     'lat':lat5,
+#     'sla':sla_lp,
+#     'clusters':allclusters,
+#     'uncert':alluncert,
+#     'count':allcount,
+#     'rempts':rempts},allow_pickle=True)
+
+# cmap2  = cm.get_cmap("jet",len(allcount)+1)
+# fig,ax = plt.subplots(1,1,subplot_kw={'projection':ccrs.PlateCarree(central_longitude=180)})
+# ax     = slutil.add_coast_grid(ax)
+# pcm    = ax.pcolormesh(lon5,lat5,rempts,cmap=cmap2,transform=ccrs.PlateCarree())
+# fig.colorbar(pcm,ax=ax)
+# ax.set_title("Removed Points")
+# plt.savefig("%sRemovedPoints_by_Iteration.png" % (expdir),dpi=200)
+# plt.pcolormesh(lon5,lat5,rempts)
