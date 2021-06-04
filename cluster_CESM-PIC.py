@@ -45,7 +45,7 @@ import tbx
 
 # Set Paths
 datpath    = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/"
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210519/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210603/"
 proc.makedir(outfigpath)
 
 # Experiment Names
@@ -54,7 +54,7 @@ proc.makedir(outfigpath)
 #start      = '1850-01'
 #end        = '2100-12'
 nclusters   = 6
-rem_gmsl    = False
+rem_gmsl    = True
 e           = 0  # Ensemble index (ensnum-1), remove after loop is developed
 maxiter     = 5  # Number of iterations for elimiting points
 minpts      = 30 # Minimum points per cluster
@@ -698,38 +698,112 @@ rempt     = [nlat,nlon]
 sla_in = sla_lp[:,:,:]
 
 # Do Clustering
-allclusters,alluncert,allcount,rempt,allWk = elim_points(sla_in,lat5,lon5,nclusters,minpts,maxiter,expdir,
+allclusters,alluncert,allcount,rempt,allWk = slutil.elim_points(sla_in,lat5,lon5,nclusters,minpts,maxiter,expdir,
                                                              viz=False,printmsg=False)
 
-inclust = np.array(allclusters[0])
-inuncert = np.array(alluncert[0])
 
-# Adjust classes
-clusterPIC = remapcluster(inclust,lat5,lon5,regiondict)
+#%% Plot the results
 
-# Plot some results (Clusters Themselves)
-proj = ccrs.PlateCarree(central_longitude=180)
-fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
-ax     = viz.add_coast_grid(ax)
-pcm=ax.pcolormesh(lon5,lat5,clusterPIC,cmap=cmapn,transform=ccrs.PlateCarree())
-fig.colorbar(pcm,ax=ax,fraction=0.025)
-ax.set_title("CESM-PiC Clusters (Year 400 to 2200)")
-plt.savefig("%sCESM1PIC_%s_Clusters_all.png"%(outfigpath,expname),dpi=200,bbox_inches='tight')
 
-# Now Plot the Uncertainties
+
+# Dictionary of Bounding Boxes to search thru
+# Inputs
+clusterin = allclusters[-1]
+uncertin = alluncert[0]
+rempts = rempt
 vlm = [-10,10]
+nclusters = 6
+
+
+start = '400-01'
+end = '2200-01'
+sameplot=True
+
+# Make Region Colors
+cmapn,regiondict = slutil.get_regions()
+
+# rempts = rempts.flatten()
+# rempts[~np.isnan(rempts)] = 1
+# rempts = rempts.reshape(nlat5,nlon5)
+
 proj = ccrs.PlateCarree(central_longitude=180)
-fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+
+# Rearrange clustering number
+clusternew,remapdict = slutil.remapcluster(clusterin,lat5,lon5,regiondict,returnremap=True)
+
+
+# -------------
+# Plot Clusters
+# -------------
+if sameplot:
+    fig,axs = plt.subplots(1,2,subplot_kw={'projection':proj},figsize=(12,4))
+    ax = axs[0]
+else:
+    fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
 ax     = viz.add_coast_grid(ax)
-pcm=ax.pcolormesh(lon5,lat5,inuncert,vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+pcm    = ax.pcolormesh(lon5,lat5,clusternew,cmap=cmapn,transform=ccrs.PlateCarree())
+#ax.pcolor(lon5,lat5,rempts,cmap='Greys',transform=ccrs.PlateCarree(),hatch=":")
+for o in range(nlon5):
+    for a in range(nlat5):
+        pt = rempts[a,o]
+        if np.isnan(pt):
+            continue
+        else:
+            ax.scatter(lon5[o],lat5[a],s=10,marker="x",color="k",transform=ccrs.PlateCarree())
 fig.colorbar(pcm,ax=ax,fraction=0.025)
-ax.set_title(r"CESM-PIC Cluster Uncertainty $(<\sigma^{2}_{in,x}>/<\sigma^{2}_{out,x}>)$"+" \n (Year 400 to 2200) ")
-plt.savefig("%sCESM1PIC_%s_Uncert_all.png"%(outfigpath,expname),dpi=200,bbox_inches='tight')
+ax.set_title("CESM1 Clusters (%s to %s)"%(start,end))
+if sameplot:
+    ax = axs[1]
+else:
+    plt.savefig("%s%s_ClustersMap.png"%(expdir,expname),dpi=200,bbox_inches='tight')
+    fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+# ------------------
+# Plot Uncertainties
+# ------------------
+ax     = viz.add_coast_grid(ax)
+pcm=ax.pcolormesh(lon5,lat5,uncertin,vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+#cl = ax.contour(lon5,lat5,clusternew,levels=np.arange(0,nclusters+2),colors='k',transform=ccrs.PlateCarree())
+
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title(r"CESM1 Cluster Uncertainty $(<\sigma^{2}_{x,in}>/<\sigma^{2}_{x,out}>)$")
+
+if sameplot:
+    plt.savefig("%s%s_Cluster_and_Uncert.png"%(expdir,expname),dpi=200,bbox_inches='tight')
+else:
+    plt.savefig("%s%s_ClustersUncert.png"%(expdir,expname),dpi=200,bbox_inches='tight')
 
 
 
-# Reassign to another Map
-clusterPICALL = clusterPIC.copy()
+
+# inclust = np.array(allclusters[0])
+# inuncert = np.array(alluncert[0])
+
+# # Adjust classes
+# clusterPIC = remapcluster(inclust,lat5,lon5,regiondict)
+
+# # Plot some results (Clusters Themselves)
+# proj = ccrs.PlateCarree(central_longitude=180)
+# fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+# ax     = viz.add_coast_grid(ax)
+# pcm=ax.pcolormesh(lon5,lat5,clusterPIC,cmap=cmapn,transform=ccrs.PlateCarree())
+# fig.colorbar(pcm,ax=ax,fraction=0.025)
+# ax.set_title("CESM-PiC Clusters (Year 400 to 2200)")
+# plt.savefig("%sCESM1PIC_%s_Clusters_all.png"%(outfigpath,expname),dpi=200,bbox_inches='tight')
+
+# # Now Plot the Uncertainties
+# vlm = [-10,10]
+# proj = ccrs.PlateCarree(central_longitude=180)
+# fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+# ax     = viz.add_coast_grid(ax)
+# pcm=ax.pcolormesh(lon5,lat5,inuncert,vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+# fig.colorbar(pcm,ax=ax,fraction=0.025)
+# ax.set_title(r"CESM-PIC Cluster Uncertainty $(<\sigma^{2}_{in,x}>/<\sigma^{2}_{out,x}>)$"+" \n (Year 400 to 2200) ")
+# plt.savefig("%sCESM1PIC_%s_Uncert_all.png"%(outfigpath,expname),dpi=200,bbox_inches='tight')
+
+
+
+# # Reassign to another Map
+# clusterPICALL = clusterPIC.copy()
 #
 # %% Next, Cluster for some specific time period
 #
