@@ -17,6 +17,7 @@ import xarray as xr
 import numpy as np
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+import matplotlib as mpl
 
 from tqdm import tqdm
 from pylab import cm
@@ -649,6 +650,26 @@ def reassign_classes(inclust,mapdict,printmsg=True):
             print("Reassigned Class %i to %i "%(i,newclass))
     return clusternewflat.reshape(nlat,nlon)
 
+def get_regions():
+    regioncolors = np.array(
+                [[233,51,35],
+                [73,161,68],
+                [154,219,232],
+                [251,237,79],
+                [81,135,195],
+                [138,39,113],
+                ])/255
+    cmapn = (mpl.colors.ListedColormap(regioncolors))
+    regiondict = {1:[150,180,5,50],
+             2:[280-360,350-360,20,45],
+             3:[300-360,360-360,50,75],
+             4:[200-360,250-360,0,35],
+             5:[50,105,-30,15],
+             6:[280-330,360-360,-50,-20]
+             }
+    return cmapn,regiondict
+
+
 # --------------------------
 #%% Clustering, main scripts
 # --------------------------
@@ -789,8 +810,10 @@ def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath,nclusters):
     
     
     # Apply Thompson and Merrifield thresholds
-    uncert[uncert>2] = 2
-    uncert[uncert<0.5]=0
+    uncertcpy = uncert.copy()
+    
+    uncertcpy[uncert>2] = 2
+    uncertcpy[uncert<0.5]=0
     
     # Plot Cluster Uncertainty
     fig1,ax1 = plt.subplots(1,1,subplot_kw={'projection':proj})
@@ -801,7 +824,7 @@ def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath,nclusters):
             ci=i%len(ucolors)
         else:
             ci=i
-        cuncert = uncert.copy()
+        cuncert = uncertcpy.copy()
         cuncert[clustered!=cid] *= np.nan
         ax1.pcolormesh(lon5,lat5,cuncert,vmin=0,vmax=2,cmap=ucolors[ci],transform=ccrs.PlateCarree())
         #fig.colorbar(pcm,ax=ax)
@@ -832,7 +855,7 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
     # Loop
     flag = True
     it   = 0
-    while flag and it < maxiter:
+    while flag or it < maxiter:
         
         if printmsg:
             print("Iteration %i ========================="%it)
