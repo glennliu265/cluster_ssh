@@ -799,9 +799,15 @@ sshin  = ssha
 niter  = 1000
 wnout,rnout,ar1m,neffm = bootstrap_ssh(sshin,niter,tw,order,simlen=simlen)
 
-
-
-
+# Save output
+np.savez("%sNoiseMaps_AVISO_niter%i.npz"%(datpath,niter),
+         **{'wnout':wnout,
+            'rnout':rnout,
+            'lat': lat5,
+            'lon': lon5,
+            'ar1m' : ar1m,
+            'neffm' : neffm
+             },allow_pickle=True)
 
 
 
