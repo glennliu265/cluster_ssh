@@ -4,8 +4,6 @@
 
 Analyze CESM-PIC-window clustering results, specifically for the indian ocean
 
-
-
 @author: gliu
 """
 
@@ -49,7 +47,7 @@ import matplotlib as mpl
 
 # Set Paths
 datpath    = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/"
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210601/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210610/"
 proc.makedir(outfigpath)
 
 # Experiment Names
@@ -228,15 +226,22 @@ for idx in tqdm(range(nint)): # Portions copied from script below
 
 #%% Find some extreme values
 
-
-
-
-
-
+# Calculate averaged silhouette value over a particular region
 bboxsil        = regiondict[1]
 sreg,slon,slat = proc.sel_region(silmap_all.transpose(2,1,0),lon5,lat5,bboxsil)
+      
 s_allin        = np.nanmean(sreg,(0,1))
 
+# Flatte the region, and count the number of unique values within that region
+creg,_,_  = proc.sel_region(clusts.transpose(2,1,0),lon5,lat5,bboxsil)
+nlatr,nlonr,nrngs = creg.shape
+cregflat = creg.reshape(nlatr*nlonr,nrngs)
+okdata,knan,okpts = proc.find_nan(cregflat,1) # Pick only non-nan points
+npts = okdata.shape[0]
+rcount = np.zeros(nrngs)
+for t in range(nrngs):
+    indata = okdata[:,t]
+    rcount[t] = len(np.unique(indata))
 
 def findk(arr,k,max=True):
     # From here: https://stackoverflow.com/questions/6910641/how-do-i-get-indices-of-n-maximum-values-in-a-numpy-array
@@ -283,8 +288,99 @@ dmi = np.load(datpath+"CESM-PIC_DMI.npy")
 dmi_full = np.zeros(sla_lp.shape[0])*np.nan
 dmi_full[24:-12] = dmi
 
+
+#%% Compute an integrated Dipole Mode Index
+
+ntime   = dmi_full.shape[0]
+winsize = 240
+
+# Preallocate
+idmi_p = np.zeros(ntime-winsize)
+idmi_n = np.zeros(ntime-winsize)
+
+# Copy DMI, grab positive and negative values
+dmi_n = dmi_full.copy()
+dmi_p = dmi_full.copy()
+dmi_n[dmi_full>0] = 0
+dmi_p[dmi_full<0] = 0
+
+# Now integrat over each period
+for i in tqdm(range(ntime-winsize)):
+    krng = np.arange(i,i+winsize+1)
+    idmi_p[i] = np.sum(dmi_p[krng])
+    idmi_n[i] = np.sum(dmi_n[krng])
+
+
+idmi_total = idmi_p + idmi_n
+
+#%% Plot the integrated INdex
+
+
+fig,axs=plt.subplots(3,1,figsize=(12,10))
+
+ax = axs[0]
+ax.plot(idmi_n,color='b')
+ax.set_title("Integrated (-) Dipole Mode Index (rho= %.3f)"%(np.corrcoef(sscore[~np.isnan(idmi_n)],idmi_n[~np.isnan(idmi_n)])[0,1]))
+
+
+ax = axs[1]
+#ax.plot(sscore,color='gray')
+ax.plot(idmi_p,color='r')
+ax.set_title("Integrated (-) Dipole Mode Index (rho= %.3f)"%(np.corrcoef(sscore[~np.isnan(idmi_p)],idmi_p[~np.isnan(idmi_p)])[0,1]))
+
+ax = axs[2]
+ax.plot(sscore,color='gray')
+ax.set_title("Silhouette Score")
+
+#ax.plot(idmi_total,color='k')
+#ax.set_title("Integrated Total Dipole Mode Index (rho= %.3f)"%(np.corrcoef(sscore[~np.isnan(idmi_total)],idmi_total[~np.isnan(idmi_total)])[0,1]))
+
+plt.savefig("%sIDMI_timeseries.png"%(outfigpath),dpi=200,bbox_tight='inches')
+
+
+#%% Plot some histograms
+tails = 2
+conf  = 0.95
+nbins = 50
+invar1 = idmi_n
+invar2 = idmi_p
+title1 = "Integrated (-) Dipole Mode Index"
+title2 = "Integrated (+) Dipole Mode Index"
+fig,axs = plt.subplots(3,1,sharey=True,sharex=False,figsize=(8,10))
+
+ax = axs[0]
+ax = slutil.plothist(invar1,tails,conf,nbins,'b',ax=ax)
+ax.grid(True,ls='dotted',zorder=-1)
+ax.legend(fontsize=10)
+ax.set_title("%s ($1\sigma=$%.2e)" % (title1,np.nanstd(invar1)))
+
+ax = axs[1]
+ax = slutil.plothist(invar2,tails,conf,nbins,'r',ax=ax)
+ax.grid(True,ls='dotted',zorder=-1)
+ax.legend(fontsize=10)
+ax.set_title("%s ($1\sigma=$%.2e)" % (title2,np.nanstd(invar2)))
+
+invar2 = sscore
+title2 = "Silhouette Score"
+
+ax = axs[2]
+ax = slutil.plothist(invar2,tails,conf,nbins,'gray',ax=ax)
+ax.grid(True,ls='dotted',zorder=-1)
+ax.legend(fontsize=10)
+ax.set_title("%s ($1\sigma=$%.2e)" % (title2,np.nanstd(invar2)))
+
+
+plt.suptitle("Silhouette Score for Clustering Results")
+plt.savefig("%sSilhouetteScore_Histogram_Synthetic.png"%(outfigpath),
+            dpi=150,bbox_tight='inches')
+
+plt.savefig("%sIDMI_distr.png"%(outfigpath),dpi=200,bbox_tight='inches')
+
+
 #%% For each period, investigate the occurence of IOD...
 
+kmax = findk(idmi_p,k,max=False)
+kmin = findk(idmi_n,k,max=True)
 
     
 for kmode in ['max','min']:
@@ -500,7 +596,43 @@ ax.plot()
 
 
 
+#%% Given the counts for each region, get some statistics
 
+
+invars2 = [sscore,idmi_p,idmi_n,idmi_total]
+titlesl = ("Silhouette Score","(+) Integrated Dipole Mode Index","(-) Integrated Dipole Mode Index","Total Integrated Dipole Mode Index")
+fnl = ["sscore","idmip","idmin","idmit"]
+
+colss = ['r','b','y','g']
+nc,ncounts=np.unique(rcount,return_counts=True)
+
+for v in range(4):
+    invar = invars2[v]
+    # Make histograms for each case
+    fig,axs=plt.subplots(len(nc),1,sharex=True,figsize=(6,8))
+    for i in range(len(nc)):
+        
+        idc = int(nc[i])  # Number of clusters in region
+        kin = rcount==idc # Indices of when this happens
+        
+        idvar = invar[kin]
+        ax = axs[i]
+        ax = slutil.plothist(idvar,tails,conf,nbins,colss[i],ax=ax)
+        ax.grid(True,ls='dotted',zorder=-1)
+        ax.legend(fontsize=8)
+        ax.set_title("%i Clusters count=%i ($1\sigma=$%.2e)" % (idc,ncounts[i],np.nanstd(idvar)))
+    plt.suptitle("%s Distributions" % (titlesl[v]),y=.95)
+    plt.savefig("%s%s_Histograms_by_Clust.png"%(outfigpath,fnl[v]),dpi=200,bbox_tight='inches')
+
+    
+    
+#%%
+
+fig,ax = plt.subplots(1,1)
+
+ax.scatter()
+    
+    
 
 
 
