@@ -45,7 +45,7 @@ import tbx
 
 # Set Paths
 datpath    = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/"
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210603/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210610/"
 proc.makedir(outfigpath)
 
 # Experiment Names
@@ -362,7 +362,7 @@ latf = 50
 timesyr = np.arange(0,int(len(times)/12)) 
 if rem_gmsl>0:
     print("Removing GMSL")
-    out1 = slutil.remove_GMSL(ssha,lat5,lon5,timesyr,viz=True,testpoint=[lonf,latf])
+    out1 = slutil.remove_GMSL(ssha,lat5,lon5,timesyr,viz=True,testpoint=[lonf,latf],awgt=True)
     
     if len(out1)>2:
         ssha,gmslrem,fig,ax = out1
@@ -698,8 +698,8 @@ rempt     = [nlat,nlon]
 sla_in = sla_lp[:,:,:]
 
 # Do Clustering
-allclusters,alluncert,allcount,rempt,allWk = slutil.elim_points(sla_in,lat5,lon5,nclusters,minpts,maxiter,expdir,
-                                                             viz=False,printmsg=False)
+allclusters,alluncert,allcount,rempt,allWk,alls,alls_byclust= slutil.elim_points(sla_in,lat5,lon5,nclusters,minpts,maxiter,expdir,
+                                                             viz=False,printmsg=True,calcsil=True)
 
 
 #%% Plot the results
@@ -709,7 +709,7 @@ allclusters,alluncert,allcount,rempt,allWk = slutil.elim_points(sla_in,lat5,lon5
 # Dictionary of Bounding Boxes to search thru
 # Inputs
 clusterin = allclusters[-1]
-uncertin = alluncert[0]
+uncertin = alluncert[-1]
 rempts = rempt
 vlm = [-10,10]
 nclusters = 6
@@ -799,6 +799,205 @@ else:
 # fig.colorbar(pcm,ax=ax,fraction=0.025)
 # ax.set_title(r"CESM-PIC Cluster Uncertainty $(<\sigma^{2}_{in,x}>/<\sigma^{2}_{out,x}>)$"+" \n (Year 400 to 2200) ")
 # plt.savefig("%sCESM1PIC_%s_Uncert_all.png"%(outfigpath,expname),dpi=200,bbox_inches='tight')
+
+#%% Plot results again, but this time with the silhouette metric
+
+
+sigval = 4.115e-3 # Significance Value (Greater than Red-Noise Null Hypothesis)
+
+# Dictionary of Bounding Boxes to search thru
+# Inputs
+clusterin = allclusters[-1]
+uncertin = alluncert[-1]
+s_in = alls[-1]
+rempts = rempt
+vlm = [-10,10]
+nclusters = 6
+
+
+start = '400-01'
+end = '2200-01'
+sameplot=True
+
+# Make Region Colors
+cmapn,regiondict = slutil.get_regions()
+
+# rempts = rempts.flatten()
+# rempts[~np.isnan(rempts)] = 1
+# rempts = rempts.reshape(nlat5,nlon5)
+
+proj = ccrs.PlateCarree(central_longitude=180)
+
+# Rearrange clustering number
+clusternew,remapdict = slutil.remapcluster(clusterin,lat5,lon5,regiondict,returnremap=True)
+
+
+# -------------
+# Plot Clusters
+# -------------
+if sameplot:
+    fig,axs = plt.subplots(1,2,subplot_kw={'projection':proj},figsize=(12,4))
+    ax = axs[0]
+else:
+    fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax     = viz.add_coast_grid(ax)
+pcm    = ax.pcolormesh(lon5,lat5,clusternew,cmap=cmapn,transform=ccrs.PlateCarree())
+#ax.pcolor(lon5,lat5,rempts,cmap='Greys',transform=ccrs.PlateCarree(),hatch=":")
+for o in range(nlon5):
+    for a in range(nlat5):
+        pt = rempts[a,o]
+        if np.isnan(pt):
+            continue
+        else:
+            ax.scatter(lon5[o],lat5[a],s=10,marker="x",color="k",transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title("CESM1 Clusters (%s to %s)"%(start,end))
+if sameplot:
+    ax = axs[1]
+else:
+    plt.savefig("%s%s_ClustersMap.png"%(expdir,expname),dpi=200,bbox_inches='tight')
+    fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+
+
+
+# Plot 1: the silhoutte value map
+cmap="RdBu_r"
+silmap = np.zeros(nlat5*nlon5)*np.nan
+silmap[okpts] = s_in
+silmap = silmap.reshape(nlat5,nlon5)
+
+proj = ccrs.PlateCarree(central_longitude=180)
+#fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax     = slutil.add_coast_grid(ax,leftlab=False,botlab=False)
+pcm=ax.pcolormesh(lon5,lat5,silmap,vmin=-.25,vmax=.25,cmap=cmap,transform=ccrs.PlateCarree())
+# for o in range(nlon5):
+#     for a in range(nlat5):
+#         pt = silmap[a,o]
+#         if pt > sigval:
+#             continue
+#         else:
+#             ax.scatter(lon5[o],lat5[a],s=10,marker="x",color="k",transform=ccrs.PlateCarree())
+ax.contour(lon5,lat5,silmap,levels=[sigval],colors='k',linewidths=0.75,linestyles=":",transform=ccrs.PlateCarree())
+ax.pcolormesh(lon5,lat5,silmap,vmin=-.5,vmax=.5,cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title("Silhouette Map ($s_{avg}=%.2e$)"%(s_in.mean()))
+
+
+if sameplot:
+    plt.savefig("%s%s_Cluster_and_Sil.png"%(expdir,expname),dpi=200,bbox_inches='tight')
+else:
+    plt.savefig("%s%s_ClustersUncert.png"%(expdir,expname),dpi=200,bbox_inches='tight')
+
+
+
+
+
+
+#%% WTF is happening with uncertainty. Lets take a look
+
+varin = sla_lp[:,:,:]
+
+# distmode
+# 0: Default (Distance and Corr)
+# 1: Distance Only
+# 2: Corr Only
+# 3: Red Noise Dist
+
+# uncertmode
+# 0: Default (E(Cov_in) / E(Cov_out))
+# 1: Median  (Med(Cov_in) / M(Cov_out))
+
+# absmode
+# 0: Default: Correlation and Covariances, no modification
+# 1: Absolute Values: Take abs(corr) and abs(cov)
+# 2: Anti: Take -1*corr, -1*cov
+
+distmode   = 0
+absmode    = 0
+uncertmode = 0
+chardist   = 3000
+
+# ------------------
+# Calculate Matrices
+# ------------------
+ntime,nlat,nlon = varin.shape
+srho,scov,sdist,okdata,okpts,coords2=slutil.calc_matrices(varin,lon5,lat5,return_all=True)
+if absmode == 1:
+    scov = np.abs(scov)
+    srho = np.abs(srho)
+elif absmode == 2:
+    scov *= -1
+    srho *= -1
+
+# --------------------------
+# Combine the Matrices
+# --------------------------
+distthres=3000
+
+# Default Distance Calculation
+a_fac = np.sqrt(-distthres/(2*np.log(0.5)))
+expterm = np.exp(-sdist/(2*a_fac**2))
+if distmode == 0:
+    distance_matrix = 1-expterm*srho
+elif distmode == 1:
+    distance_matrix = 1-expterm
+elif distmode == 2:
+    distance_matrix = 1-srho
+elif distmode == 3:
+    distance_matrix = 1-expterm*np.exp(-distthres/chardist)
+    
+
+# --------------------------
+# Do Clustering (scipy)
+# --------------------------
+cdist      = squareform(distance_matrix,checks=False)
+linked     = linkage(cdist,'weighted')
+clusterout = fcluster(linked, nclusters,criterion='maxclust')
+
+
+# ----------------------------
+# Calculate Silhouette Metrics
+# ----------------------------
+s_score,s,s_byclust=slutil.calc_silhouette(distance_matrix,clusterout,nclusters)
+
+
+# --------------------------
+# Replace into pull matrix
+# --------------------------
+clustered = np.zeros(nlat*nlon)*np.nan
+silmap    = clustered.copy()
+clustered[okpts] = clusterout
+silmap[okpts] = s
+clustered = clustered.reshape(nlat,nlon)
+silmap = silmap.reshape(nlat,nlon)
+
+# ---------------------
+# Calculate Uncertainty
+# ---------------------
+uncertout = np.zeros(clusterout.shape)
+covins = []
+covouts = []
+for i in range(len(clusterout)):
+    
+    covpt     = scov[i,:]     #
+    cid       = clusterout[i] #
+    covin     = covpt[np.where(clusterout==cid)]
+    covout    = covpt[np.where(clusterout!=cid)]
+    covins.append(covin)
+    covouts.append(covout)
+    
+    if uncertmode == 0:
+        uncertout[i] = np.mean(covin)/np.mean(covout)
+    elif uncertmode == 1:
+        uncertout[i] = np.median(covin)/np.median(covout)
+uncert = np.zeros(nlat*nlon)*np.nan
+uncert[okpts] = uncertout
+uncert = uncert.reshape(nlat,nlon)
+
+
+
+
+
 
 
 
