@@ -52,7 +52,7 @@ import matplotlib as mpl
 
 # Set Paths
 datpath    = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/"
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210601/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210610/"
 proc.makedir(outfigpath)
 
 # Experiment Names
@@ -134,7 +134,7 @@ s_by_clust  = ld['s_by_clust']
 rngs        = ld['rngs']
 
 #%% Load lowpased sla data
-order = 5
+order  = 5
 order  = 5
 tw     = 18 # filter size for time dim
 outname = "%sSSHA_LP_%s_order%i_cutoff%i.npz" % (datpath,datname,order,tw)
@@ -148,6 +148,20 @@ times = ld2['times']
 
 nlat5 = len(lat5)
 nlon5 = len(lon5)
+
+
+#%% Calculate standard deviation for each period
+
+sla_std = np.zeros((len(clusts),nlat5,nlon5))
+
+for i in tqdm(range(len(clusts))):
+    k = np.arange(i,i+winsize)
+    
+    grabsla = sla_lp[k,:,:]
+    sla_std[i,:,:] = grabsla.std(0)
+    
+
+
 #%% Try Shfting, then calculating pattern correlation
 
 test = clusts[0]
@@ -305,6 +319,8 @@ for idx in tqdm(range(nint)): # Portions copied from script below
 
 vlims = [-.15,.15]
 
+
+
 cmap="RdBu_r"
 proj = ccrs.PlateCarree(central_longitude=180)
 fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
@@ -339,6 +355,20 @@ ax.set_title("Negative Silhouette Value Count for CESM-PiC Clusters (Year 400-22
 plt.savefig("%sCESM1PIC_CountNegSilhouetteMap_%s.png"%(outfigpath,expname),dpi=200,bbox_inches='tight')
 
 
+#%% Visualize a histogram of silhouette values
+
+sscore = np.nanmean(silmap_all,(1,2))
+
+tails = 2
+conf  = 0.95
+nbins = 50
+
+fig,ax = plt.subplots(1,1,figsize=(6,4))
+ax.grid(True,ls='dotted')
+ax = slutil.plothist(sscore,tails,conf,nbins,'green',ax=ax)
+ax.legend(fontsize=8)
+ax.set_title("Distribution of Silhouette Scores (CESM1-PIC)  \n $1\sigma=%.2e$"%(sscore.std()))
+plt.savefig("%sSilhouette_Score_Histogram.png"%(outfigpath),dpi=200)
 
 
 #%% Try Visualizing something
@@ -381,11 +411,17 @@ ax.legend()
 plt.savefig("%sMinMax_sscore_k%i_%s_Clusters_Mult.png"%(outfigpath,k,expname),dpi=200,bbox_inches='tight')
 
 
+# def retrieve_info(idx):
+#     clusterin    = clusts[idx] 
+#     s_in         = s_all[idx]
+#     s_byclust_in = s_by_clust[idx]
+#     countin      = count[idx]
+#     rngin        = rngs[idx]
+#     rempts_in    = rempts[idx]
+    
+
+
 # Now plot the clustering map and uncertaint of that point
-
-
-
-
 for kmode in ['max','min']:
     for ii in range(k):
         print(ii)
@@ -475,6 +511,470 @@ for kmode in ['max','min']:
         plt.savefig("%sCESM1PIC_%s_ClustersUncert_k%s%i_%s.png"%(outfigpath,expname,kmode,ii,yearstr),dpi=200,bbox_inches='tight')
         
         # End i loop
+
+#%% Plot histogram of clustering results verssus within clustering map
+
+tails = 2
+conf  = 0.95
+nbins = 50
+
+fig,axs = plt.subplots(2,1,figsize=(6,5),sharex=True)
+
+# ax = axs[0]
+# ax.grid(True,ls='dotted')
+# ax = slutil.plothist(sscore,tails,conf,nbins,'green',ax=ax)
+# ax.legend(fontsize=8)
+# ax.set_title("Average Silhouette Scores for all CESM1-PIC)  \n $1\sigma=%.2e$"%(sscore.std()))
+
+# Plot maximum
+ax = axs[0]
+sin = s_all[kmax[0]]
+ax.grid(True,)
+ax.grid(True,ls='dotted')
+ax = slutil.plothist(sin,tails,conf,nbins,'red',ax=ax)
+ax.legend(fontsize=8)
+ax.set_title("Silhouette Score Histogram $1\sigma=%.2e$"%(sin.std()))
+
+# Plot min
+ax = axs[1]
+sin = s_all[kmin[0]]
+ax.grid(True,)
+ax.grid(True,ls='dotted')
+ax = slutil.plothist(sin,tails,conf,nbins,'blue',ax=ax)
+ax.legend(fontsize=8)
+ax.set_title("Silhouette Score Histogram $1\sigma=%.2e$"%(sin.std()))
+
+
+
+
+plt.savefig("%sSilhouette_Score_Histogram.png"%(outfigpath),dpi=200)
+
+
+#%% Max n Min Plots
+
+
+sigval = 4.115e-3
+
+sla_stdall = sla_lp.std(0)
+
+stdratio = True
+
+fig,axs = plt.subplots(2,3,subplot_kw={'projection':proj},figsize=(14,5))
+        
+# Now plot the clustering map and uncertaint of that point
+for coll,kmode in enumerate(['max','min']):
+    
+    
+    
+    for ii in [0]:
+        print(ii)
+        if kmode == "max":
+            idx = kmax[ii]
+        elif kmode == "min":
+            idx = kmin[ii]
+        else:
+            print("kmode is invalid")
+            break
+        
+       
+        # Retrieve cluster information
+        clusterin    = clusts[idx] 
+        uncertin     = uncert[idx]
+        s_in         = s_all[idx]
+        s_byclust_in = s_by_clust[idx]
+        countin      = count[idx]
+        rngin        = rngs[idx]
+        rempts_in    = rempts[idx]
+        if stdratio:
+            sla_std_in   = sla_std[idx,:,:] / sla_stdall
+            slim = [0,2]
+        else:
+            sla_std_in   = sla_std[idx,:,:] - sla_stdall
+            slim = [-.025,.025]
+            sla_std_in   = sla_std[idx,:,:] - sla_stdall
+        
+        # Set some texts
+        yearstr = "%04i-%02i to %04i-%02i" % (rngin[0].year,rngin[0].month,rngin[-1].year,rngin[-1].month)
+        
+        # Adjust Cluster numbering
+        clusternew,remapdict = slutil.remapcluster(clusterin,lat5,lon5,regiondict,returnremap=True)
+        new_sbyclust = np.zeros(nclusters)
+        
+        for ks in remapdict.keys():
+            newclass = remapdict[ks] # Class that k was remapped to
+            new_sbyclust[newclass-1] = s_byclust_in[ks-1] # Reassign
+            print("Reassigned new class %i"%newclass)
+        
+        # Recover clusterout for silhouette plotting
+        remmask = rempts_in.copy()
+        remmask[~np.isnan(remmask)] = np.nan # Convert all removed points to NaN
+        remmask[np.isnan(rempts_in)] = 1
+        clusterout,knan,okpts = proc.find_nan((clusternew*remmask).flatten(),0)
+        
+        # Ugly Fix, but not sure why sometimes s_in size doesnt match clusterin (non-nan)
+        if len(clusterout) != len(s_in):
+            clusterout,knan,okpts = proc.find_nan((clusternew).flatten(),0)
+        
+        # Upper Row, the clustering result
+        ax = axs[coll,0]
+        #fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+        ax     = slutil.add_coast_grid(ax,leftlab=False,botlab=False)
+        pcm=ax.pcolormesh(lon5,lat5,clusternew,cmap=cmapn,transform=ccrs.PlateCarree())
+        fig.colorbar(pcm,ax=ax,fraction=0.025)
+        ax.set_title("Clusters (Year %s)" % (yearstr))
+        #plt.savefig("%sCESM1PIC_%s_ClustersMap_k%s%i_%s.png"%(outfigpath,expname,kmode,ii,yearstr),dpi=200,bbox_inches='tight')
+        
+        # Plot 1: the silhoutte value map
+        ax = axs[coll,1]
+        cmap="RdBu_r"
+        silmap = np.zeros(nlat5*nlon5)*np.nan
+        silmap[okpts] = s_in
+        silmap = silmap.reshape(nlat5,nlon5)
+        
+        proj = ccrs.PlateCarree(central_longitude=180)
+        #fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+        ax     = slutil.add_coast_grid(ax,leftlab=False,botlab=False)
+        pcm=ax.pcolormesh(lon5,lat5,silmap,vmin=-.25,vmax=.25,cmap=cmap,transform=ccrs.PlateCarree())
+        # for o in range(nlon5):
+        #     for a in range(nlat5):
+        #         pt = silmap[a,o]
+        #         if pt > sigval:
+        #             continue
+        #         else:
+        #             ax.scatter(lon5[o],lat5[a],s=10,marker="x",color="k",transform=ccrs.PlateCarree())
+        ax.contour(lon5,lat5,silmap,levels=[sigval],colors='k',linewidths=0.75,linestyles=":",transform=ccrs.PlateCarree())
+        ax.pcolormesh(lon5,lat5,silmap,vmin=-.5,vmax=.5,cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+        fig.colorbar(pcm,ax=ax,fraction=0.025)
+        ax.set_title("Silhouette Map ($s_{avg}=%.2e$)"%(sscore[idx]))
+        #ax.set_title("Silhouette Values for CESM-PiC Clusters (Year %s) \n $s_{avg}$ = %.3f" % (yearstr,s_in.mean()))
+        #plt.savefig("%sCESM1PIC_%s_SilhouetteMap_k%s%i_%s.png"%(outfigpath,expname,kmode,ii,yearstr),dpi=200,bbox_inches='tight')
+        
+        # Plot 3: Variance Difference
+        ax = axs[coll,2]
+        cmap="RdBu_r"
+        proj = ccrs.PlateCarree(central_longitude=180)
+        #fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+        ax     = slutil.add_coast_grid(ax,leftlab=False,botlab=False)
+        pcm=ax.pcolormesh(lon5,lat5,sla_std_in,vmin=slim[0],vmax=slim[-1],cmap=cmap,transform=ccrs.PlateCarree())
+        #ax.contour(lon5,lat5,silmap,levels=[0],colors='k',linewidths=0.75,linestyles=":",transform=ccrs.PlateCarree())
+        #ax.pcolormesh(lon5,lat5,silmap,vmin=-.5,vmax=.5,cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+        fig.colorbar(pcm,ax=ax,fraction=0.025)
+        if stdratio:
+            ax.set_title("$\sigma_{SSH,Period} : \sigma_{SSH,AVG} $")
+        else:
+            ax.set_title("$\sigma_{SSH,Period} - \sigma_{SSH,AVG} $")
+        #ax.set_title("Silhouette Values for CESM-PiC Clusters (Year %s) \n $s_{avg}$ = %.3f" % (yearstr,s_in.mean()))
+        #plt.savefig("%sCESM1PIC_%s_SilhouetteMap_k%s%i_%s.png"%(outfigpath,expname,kmode,ii,yearstr),dpi=200,bbox_inches='tight')
+        
+        
+        
+plt.savefig("%sClusters_Silhouettes_MinMax_k%i_stdratio%i.png" % (outfigpath,ii,stdratio),dpi=200,bbox_tight='inches')
+                
+#%% Consecutive Cluster Plots
+
+
+
+kstart = kmax[0]-1
+
+
+sigval = 4.115e-3
+
+sla_stdall = sla_lp.std(0)
+
+
+fig,axs = plt.subplots(2,2,subplot_kw={'projection':proj},figsize=(8,4))
+
+# Now plot the clustering map and uncertaint of that point
+for n in range(4):
+    
+    idx = kstart + n
+
+    # Retrieve cluster information
+    clusterin    = clusts[idx] 
+    uncertin     = uncert[idx]
+    s_in         = s_all[idx]
+    s_byclust_in = s_by_clust[idx]
+    countin      = count[idx]
+    rngin        = rngs[idx]
+    rempts_in    = rempts[idx]
+    sla_std_in   = sla_std[idx,:,:] - sla_stdall
+        
+    # Set some texts
+    yearstr = "%04i-%02i to %04i-%02i" % (rngin[0].year,rngin[0].month,rngin[-1].year,rngin[-1].month)
+    
+    # Adjust Cluster numbering
+    clusternew,remapdict = slutil.remapcluster(clusterin,lat5,lon5,regiondict,returnremap=True)
+    new_sbyclust = np.zeros(nclusters)
+    
+    for ks in remapdict.keys():
+        newclass = remapdict[ks] # Class that k was remapped to
+        new_sbyclust[newclass-1] = s_byclust_in[ks-1] # Reassign
+        print("Reassigned new class %i"%newclass)
+    
+    # Recover clusterout for silhouette plotting
+    remmask = rempts_in.copy()
+    remmask[~np.isnan(remmask)] = np.nan # Convert all removed points to NaN
+    remmask[np.isnan(rempts_in)] = 1
+    clusterout,knan,okpts = proc.find_nan((clusternew*remmask).flatten(),0)
+    
+    # Ugly Fix, but not sure why sometimes s_in size doesnt match clusterin (non-nan)
+    if len(clusterout) != len(s_in):
+        clusterout,knan,okpts = proc.find_nan((clusternew).flatten(),0)
+    
+    # Upper Row, the clustering result
+    ax = axs.flatten()[n]
+    #fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    ax     = slutil.add_coast_grid(ax,leftlab=False,botlab=False)
+    pcm=ax.pcolormesh(lon5,lat5,clusternew,cmap=cmapn,transform=ccrs.PlateCarree())
+    fig.colorbar(pcm,ax=ax,fraction=0.025)
+    ax.set_title("Clusters (Year %s)" % (yearstr))
+    #plt.savefig("%sCESM1PIC_%s_ClustersMap_k%s%i_%s.png"%(outfigpath,expname,kmode,ii,yearstr),dpi=200,bbox_inches='tight')
+    
+    # # Plot 1: the silhoutte value map
+    # ax = axs[coll,1]
+    # cmap="RdBu_r"
+    # silmap = np.zeros(nlat5*nlon5)*np.nan
+    # silmap[okpts] = s_in
+    # silmap = silmap.reshape(nlat5,nlon5)
+    
+    # proj = ccrs.PlateCarree(central_longitude=180)
+    # #fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    # ax     = slutil.add_coast_grid(ax,leftlab=False,botlab=False)
+    # pcm=ax.pcolormesh(lon5,lat5,silmap,vmin=-.25,vmax=.25,cmap=cmap,transform=ccrs.PlateCarree())
+    # # for o in range(nlon5):
+    # #     for a in range(nlat5):
+    # #         pt = silmap[a,o]
+    # #         if pt > sigval:
+    # #             continue
+    # #         else:
+    # #             ax.scatter(lon5[o],lat5[a],s=10,marker="x",color="k",transform=ccrs.PlateCarree())
+    # ax.contour(lon5,lat5,silmap,levels=[sigval],colors='k',linewidths=0.75,linestyles=":",transform=ccrs.PlateCarree())
+    # ax.pcolormesh(lon5,lat5,silmap,vmin=-.5,vmax=.5,cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+    # fig.colorbar(pcm,ax=ax,fraction=0.025)
+    # ax.set_title("Silhouette Map ($s_{avg}=%.2e$)"%(sscore[idx]))
+    # #ax.set_title("Silhouette Values for CESM-PiC Clusters (Year %s) \n $s_{avg}$ = %.3f" % (yearstr,s_in.mean()))
+    # #plt.savefig("%sCESM1PIC_%s_SilhouetteMap_k%s%i_%s.png"%(outfigpath,expname,kmode,ii,yearstr),dpi=200,bbox_inches='tight')
+    
+    # # Plot 3: Variance Difference
+    # ax = axs[coll,2]
+    # cmap="RdBu_r"
+    # proj = ccrs.PlateCarree(central_longitude=180)
+    # #fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    # ax     = slutil.add_coast_grid(ax,leftlab=False,botlab=False)
+    # pcm=ax.pcolormesh(lon5,lat5,sla_std_in,vmin=-.025,vmax=.025,cmap=cmap,transform=ccrs.PlateCarree())
+    # #ax.contour(lon5,lat5,silmap,levels=[0],colors='k',linewidths=0.75,linestyles=":",transform=ccrs.PlateCarree())
+    # #ax.pcolormesh(lon5,lat5,silmap,vmin=-.5,vmax=.5,cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+    # fig.colorbar(pcm,ax=ax,fraction=0.025)
+    # ax.set_title("$\sigma_{SSH,Period} - \sigma_{SSH,AVG} $")
+    # #ax.set_title("Silhouette Values for CESM-PiC Clusters (Year %s) \n $s_{avg}$ = %.3f" % (yearstr,s_in.mean()))
+    # #plt.savefig("%sCESM1PIC_%s_SilhouetteMap_k%s%i_%s.png"%(outfigpath,expname,kmode,ii,yearstr),dpi=200,bbox_inches='tight')
+    
+    
+        
+plt.savefig("%sClusters_Consecutive_kstart%i.png" % (outfigpath,kstart),dpi=200,bbox_tight='inches')
+        
+#%% Consecutive Cluster Plots
+
+
+
+kstart = kmax[0]-1
+tstep  = 12
+sigval = 4.115e-3
+stdratio = True
+
+
+sla_stdall = sla_lp.std(0)
+
+
+fig,axs = plt.subplots(2,2,subplot_kw={'projection':proj},figsize=(8,4))
+
+# Now plot the clustering map and uncertaint of that point
+for n in range(4):
+    
+    idx = kstart + n*tstep
+
+    # Retrieve cluster information
+    clusterin    = clusts[idx] 
+    uncertin     = uncert[idx]
+    s_in         = s_all[idx]
+    s_byclust_in = s_by_clust[idx]
+    countin      = count[idx]
+    rngin        = rngs[idx]
+    rempts_in    = rempts[idx]
+
+        
+    # Set some texts
+    yearstr = "%04i-%02i to %04i-%02i" % (rngin[0].year,rngin[0].month,rngin[-1].year,rngin[-1].month)
+    
+    # Adjust Cluster numbering
+    clusternew,remapdict = slutil.remapcluster(clusterin,lat5,lon5,regiondict,returnremap=True)
+    new_sbyclust = np.zeros(nclusters)
+    
+    for ks in remapdict.keys():
+        newclass = remapdict[ks] # Class that k was remapped to
+        new_sbyclust[newclass-1] = s_byclust_in[ks-1] # Reassign
+        print("Reassigned new class %i"%newclass)
+    
+    # Recover clusterout for silhouette plotting
+    remmask = rempts_in.copy()
+    remmask[~np.isnan(remmask)] = np.nan # Convert all removed points to NaN
+    remmask[np.isnan(rempts_in)] = 1
+    clusterout,knan,okpts = proc.find_nan((clusternew*remmask).flatten(),0)
+    
+    # Ugly Fix, but not sure why sometimes s_in size doesnt match clusterin (non-nan)
+    if len(clusterout) != len(s_in):
+        clusterout,knan,okpts = proc.find_nan((clusternew).flatten(),0)
+    
+    # Upper Row, the clustering result
+    ax = axs.flatten()[n]
+    #fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    ax     = slutil.add_coast_grid(ax,leftlab=False,botlab=False)
+    pcm=ax.pcolormesh(lon5,lat5,clusternew,cmap=cmapn,transform=ccrs.PlateCarree())
+    fig.colorbar(pcm,ax=ax,fraction=0.025)
+    ax.set_title("Clusters (Year %s)" % (yearstr))
+    #plt.savefig("%sCESM1PIC_%s_ClustersMap_k%s%i_%s.png"%(outfigpath,expname,kmode,ii,yearstr),dpi=200,bbox_inches='tight')
+    
+    # # Plot 1: the silhoutte value map
+    # ax = axs[coll,1]
+    # cmap="RdBu_r"
+    # silmap = np.zeros(nlat5*nlon5)*np.nan
+    # silmap[okpts] = s_in
+    # silmap = silmap.reshape(nlat5,nlon5)
+    
+    # proj = ccrs.PlateCarree(central_longitude=180)
+    # #fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    # ax     = slutil.add_coast_grid(ax,leftlab=False,botlab=False)
+    # pcm=ax.pcolormesh(lon5,lat5,silmap,vmin=-.25,vmax=.25,cmap=cmap,transform=ccrs.PlateCarree())
+    # # for o in range(nlon5):
+    # #     for a in range(nlat5):
+    # #         pt = silmap[a,o]
+    # #         if pt > sigval:
+    # #             continue
+    # #         else:
+    # #             ax.scatter(lon5[o],lat5[a],s=10,marker="x",color="k",transform=ccrs.PlateCarree())
+    # ax.contour(lon5,lat5,silmap,levels=[sigval],colors='k',linewidths=0.75,linestyles=":",transform=ccrs.PlateCarree())
+    # ax.pcolormesh(lon5,lat5,silmap,vmin=-.5,vmax=.5,cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+    # fig.colorbar(pcm,ax=ax,fraction=0.025)
+    # ax.set_title("Silhouette Map ($s_{avg}=%.2e$)"%(sscore[idx]))
+    # #ax.set_title("Silhouette Values for CESM-PiC Clusters (Year %s) \n $s_{avg}$ = %.3f" % (yearstr,s_in.mean()))
+    # #plt.savefig("%sCESM1PIC_%s_SilhouetteMap_k%s%i_%s.png"%(outfigpath,expname,kmode,ii,yearstr),dpi=200,bbox_inches='tight')
+    
+    # # Plot 3: Variance Difference
+    # ax = axs[coll,2]
+    # cmap="RdBu_r"
+    # proj = ccrs.PlateCarree(central_longitude=180)
+    # #fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    # ax     = slutil.add_coast_grid(ax,leftlab=False,botlab=False)
+    # pcm=ax.pcolormesh(lon5,lat5,sla_std_in,vmin=-.025,vmax=.025,cmap=cmap,transform=ccrs.PlateCarree())
+    # #ax.contour(lon5,lat5,silmap,levels=[0],colors='k',linewidths=0.75,linestyles=":",transform=ccrs.PlateCarree())
+    # #ax.pcolormesh(lon5,lat5,silmap,vmin=-.5,vmax=.5,cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+    # fig.colorbar(pcm,ax=ax,fraction=0.025)
+    # ax.set_title("$\sigma_{SSH,Period} - \sigma_{SSH,AVG} $")
+    # #ax.set_title("Silhouette Values for CESM-PiC Clusters (Year %s) \n $s_{avg}$ = %.3f" % (yearstr,s_in.mean()))
+    # #plt.savefig("%sCESM1PIC_%s_SilhouetteMap_k%s%i_%s.png"%(outfigpath,expname,kmode,ii,yearstr),dpi=200,bbox_inches='tight')
+    
+    
+        
+plt.savefig("%sClusters_Consecutive_kstart%i_tstep%i.png" % (outfigpath,kstart,tstep),dpi=200,bbox_tight='inches')
+        
+
+#%% Consecutive Cluster Plots (3 in a row)
+
+kstart = kmax[0]-1
+tstep  = 12
+sigval = 4.115e-3
+
+sla_stdall = sla_lp.std(0)
+
+
+fig,axs = plt.subplots(3,3,subplot_kw={'projection':proj},figsize=(12,6))
+
+# Now plot the clustering map and uncertaint of that point
+for n in range(3):
+    
+    idx = kstart + n*tstep
+
+    # Retrieve cluster information
+    clusterin    = clusts[idx] 
+    uncertin     = uncert[idx]
+    s_in         = s_all[idx]
+    s_byclust_in = s_by_clust[idx]
+    countin      = count[idx]
+    rngin        = rngs[idx]
+    rempts_in    = rempts[idx]
+    sla_std_in   = sla_std[idx,:,:] - sla_stdall
+        
+    # Set some texts
+    yearstr = "%04i-%02i to %04i-%02i" % (rngin[0].year,rngin[0].month,rngin[-1].year,rngin[-1].month)
+    
+    # Adjust Cluster numbering
+    clusternew,remapdict = slutil.remapcluster(clusterin,lat5,lon5,regiondict,returnremap=True)
+    new_sbyclust = np.zeros(nclusters)
+    
+    for ks in remapdict.keys():
+        newclass = remapdict[ks] # Class that k was remapped to
+        new_sbyclust[newclass-1] = s_byclust_in[ks-1] # Reassign
+        print("Reassigned new class %i"%newclass)
+    
+    # Recover clusterout for silhouette plotting
+    remmask = rempts_in.copy()
+    remmask[~np.isnan(remmask)] = np.nan # Convert all removed points to NaN
+    remmask[np.isnan(rempts_in)] = 1
+    clusterout,knan,okpts = proc.find_nan((clusternew*remmask).flatten(),0)
+    
+    # Ugly Fix, but not sure why sometimes s_in size doesnt match clusterin (non-nan)
+    if len(clusterout) != len(s_in):
+        clusterout,knan,okpts = proc.find_nan((clusternew).flatten(),0)
+    
+    # Upper Row, the clustering result
+    ax = axs[0,n]
+    #fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    ax     = slutil.add_coast_grid(ax,leftlab=False,botlab=False)
+    pcm=ax.pcolormesh(lon5,lat5,clusternew,cmap=cmapn,transform=ccrs.PlateCarree())
+    fig.colorbar(pcm,ax=ax,fraction=0.025)
+    ax.set_title("Clusters (Year %s)" % (yearstr))
+    #plt.savefig("%sCESM1PIC_%s_ClustersMap_k%s%i_%s.png"%(outfigpath,expname,kmode,ii,yearstr),dpi=200,bbox_inches='tight')
+    
+    # Plot 1: the silhoutte value map
+    ax = axs[1,n]
+    cmap="RdBu_r"
+    silmap = np.zeros(nlat5*nlon5)*np.nan
+    silmap[okpts] = s_in
+    silmap = silmap.reshape(nlat5,nlon5)
+    
+    proj = ccrs.PlateCarree(central_longitude=180)
+    #fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    ax     = slutil.add_coast_grid(ax,leftlab=False,botlab=False)
+    pcm=ax.pcolormesh(lon5,lat5,silmap,vmin=-.25,vmax=.25,cmap=cmap,transform=ccrs.PlateCarree())
+    # for o in range(nlon5):
+    #     for a in range(nlat5):
+    #         pt = silmap[a,o]
+    #         if pt > sigval:
+    #             continue
+    #         else:
+    #             ax.scatter(lon5[o],lat5[a],s=10,marker="x",color="k",transform=ccrs.PlateCarree())
+    ax.contour(lon5,lat5,silmap,levels=[sigval],colors='k',linewidths=0.75,linestyles=":",transform=ccrs.PlateCarree())
+    ax.pcolormesh(lon5,lat5,silmap,vmin=-.5,vmax=.5,cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+    fig.colorbar(pcm,ax=ax,fraction=0.025)
+    ax.set_title("Silhouette Map ($s_{avg}=%.2e$)"%(sscore[idx]))
+    #ax.set_title("Silhouette Values for CESM-PiC Clusters (Year %s) \n $s_{avg}$ = %.3f" % (yearstr,s_in.mean()))
+    #plt.savefig("%sCESM1PIC_%s_SilhouetteMap_k%s%i_%s.png"%(outfigpath,expname,kmode,ii,yearstr),dpi=200,bbox_inches='tight')
+    
+    # Plot 3: Variance Difference
+    ax = axs[2,n]
+    cmap="RdBu_r"
+    proj = ccrs.PlateCarree(central_longitude=180)
+    #fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    ax     = slutil.add_coast_grid(ax,leftlab=False,botlab=False)
+    pcm=ax.pcolormesh(lon5,lat5,sla_std_in,vmin=-.025,vmax=.025,cmap=cmap,transform=ccrs.PlateCarree())
+    #ax.contour(lon5,lat5,silmap,levels=[0],colors='k',linewidths=0.75,linestyles=":",transform=ccrs.PlateCarree())
+    #ax.pcolormesh(lon5,lat5,silmap,vmin=-.5,vmax=.5,cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+    fig.colorbar(pcm,ax=ax,fraction=0.025)
+    ax.set_title("$\sigma_{SSH,Period} - \sigma_{SSH,AVG} $")
+    #ax.set_title("Silhouette Values for CESM-PiC Clusters (Year %s) \n $s_{avg}$ = %.3f" % (yearstr,s_in.mean()))
+    #plt.savefig("%sCESM1PIC_%s_SilhouetteMap_k%s%i_%s.png"%(outfigpath,expname,kmode,ii,yearstr),dpi=200,bbox_inches='tight')
+
+plt.savefig("%sClusters_Consecutive_kstart%i_tstep%i_allpanels.png" % (outfigpath,kstart,tstep),dpi=200,bbox_tight='inches')
 
 #%% Examine sea surface height values during that period
 
