@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Given CESM SSH data processed by preproc_CESM, apply spatial smoothing
+
 and regrid to 5 x 5 degree
 
 @author: gliu
@@ -16,12 +17,18 @@ from tqdm import tqdm
 import time
 
 #%% User Edits
+stormtrack = 0
 
-datpath    = "/stormtrack/data3/glliu/01_Data/03_SeaLevelProject/SSH/Regridded/"
-
-savesmooth = True
-smoothdir  = "/stormtrack/data3/glliu/01_Data/03_SeaLevelProject/SSH/Smoothed/"
-coarsedir  = "/stormtrack/data3/glliu/01_Data/03_SeaLevelProject/SSH/Coarsened/"
+if stormtrack == 1:
+    datpath    = "/stormtrack/data3/glliu/01_Data/03_SeaLevelProject/SSH/Regridded/"
+    savesmooth = True
+    smoothdir  = "/stormtrack/data3/glliu/01_Data/03_SeaLevelProject/SSH/Smoothed/"
+    coarsedir  = "/stormtrack/data3/glliu/01_Data/03_SeaLevelProject/SSH/Coarsened/"
+else:
+    datpath    = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/"
+    smoothdir = datpath
+    coarsedir = datpath
+    
 #%% Functions
 
 def load_cesm(datpath,ensnum):
@@ -93,11 +100,18 @@ def coarsen_byavg(invar,lat,lon,deg,tol,latweight=True,verbose=True,ignorenan=Fa
         i=0
         for o in range(len(lon5)):
             for a in range(len(lat5)):
+
+                
+                # Find Indices
                 lonf = lon5[o]
                 latf = lat5[a]
-                
                 lons = np.where((lon >= lonf-tol) & (lon <= lonf+tol))[0]
                 lats = np.where((lat >= latf-tol) & (lat <= latf+tol))[0]
+
+                #print("For %.2f, Looking between %.2f and <%.2f" % (lonf,lonf-tol,lonf+tol))
+                #print("%i points found for %i" % (len(lons),lonf))
+                if len(lons) == 0:
+                    print("WARNING: No points found for %i between %.2f and %.2f"% (lonf,lonf-tol,lonf+tol))
                 
                 varf = invar[:,lats[:,None],lons[None,:]]
                 
@@ -120,8 +134,8 @@ def coarsen_byavg(invar,lat,lon,deg,tol,latweight=True,verbose=True,ignorenan=Fa
                 msg="\rCompleted %i of %i"% (i,len(lon5)*len(lat5))
                 print(msg,end="\r",flush=True)
         return outvar,lat5,lon5
+    
 #%% Load data and smooth
-
 
 for e in tqdm(range(40)):
 
@@ -173,7 +187,7 @@ for e in tqdm(range(40)):
     #%% Coarsen the dataset
     
     # Apply Regridding (coarse averaging for now)
-    tol  = 0.75
+    tol  = 2.5
     deg  = 5
     sla_5deg,lat5,lon5 = coarsen_byavg(sla_filt,lat,lon,deg,tol)
     
@@ -185,3 +199,168 @@ for e in tqdm(range(40)):
                 name='SSH')
     outname = coarsedir + "SSH_coarse_ens%02d.nc" % ensnum
     ds_coarse.to_netcdf(outname,encoding={'SSH': {'zlib': True}})
+
+# #%% Try case where anomalizing happens first
+
+
+# e = 0
+
+# ensnum = e+1
+
+# # Load in data for a particular ensemble member
+# st = time.time()
+# ds = load_cesm(datpath,ensnum)
+# sla = ds.SSH.values
+# times = ds.time.values
+# lat = ds.lat.values
+# lon = ds.lon.values
+# ntime,nlat,nlon = sla.shape
+# print("Loaded data in %.2fs"%(time.time()-st))
+
+# # Remove Anomaly
+# sla = sla -sla.mean(0)[None,:,:]
+
+# # Apply Smoothing
+# slasmooth = np.zeros((ntime,nlat,nlon))
+# for i in tqdm(range(ntime)):
+#     da = xr.DataArray(sla[i,:,:].astype('float32'),
+#                     coords={'lat':lat,'lon':lon},
+#                     dims={'lat':lat,'lon':lon},
+#                     name='sla')
+#     timestamp = times[i]
+#     smooth_field = pygmt.grdfilter(grid=da, filter="g500", distance="4",nans="i")
+#     slasmooth[i,:,:] = smooth_field.values
+
+
+# # Reapply Mask to correct for smoothed edges
+# mask = sla.sum(0)
+# mask[~np.isnan(mask)] = 1
+# sla_filt = slasmooth * mask[None,:,:]
+
+
+# # Save Smoothing (If option is set)
+# if savesmooth:
+#     ds_smooth = xr.DataArray(sla_filt,
+#                 coords={'time':times,'lat':lat,'lon':lon},
+#                 dims={'time':times,'lat':lat,'lon':lon},
+#                 name='SSH')
+#     outname = smoothdir + "SSHA_smoothed_ens%02d.nc" % ensnum
+#     ds_smooth.to_netcdf(outname,encoding={'SSH': {'zlib': True}})
+
+
+# # if debug:
+# #     fig,ax = plt.subplots(1,1)
+# #     pcm = ax.pcolormesh(lon,lat,slasmooth[0,:,:],vmin=-0.4,vmax=0.4,cmap=cmap)
+# #     fig.colorbar(pcm,ax=ax)
+
+# #% Coarsen the dataset
+
+# # Apply Regridding (coarse averaging for now)
+# tol  = 0.75
+# deg  = 5
+# sla_5deg,lat5,lon5 = coarsen_byavg(sla_filt,lat,lon,deg,tol)
+
+
+# # Save result
+# ds_coarse = xr.DataArray(sla_5deg,
+#             coords={'time':times,'lat':lat5,'lon':lon5},
+#             dims={'time':times,'lat':lat5,'lon':lon5},
+#             name='SSH')
+# outname = coarsedir + "SSHA_coarse_ens%02d.nc" % ensnum
+# ds_coarse.to_netcdf(outname,encoding={'SSH': {'zlib': True}})
+
+#%%
+
+for e in tqdm(range(40)):
+
+    ensnum = e+1
+
+    # Load in data for a particular ensemble member
+    st = time.time()
+    ds = xr.open_dataset(smoothdir+"SSH_smoothed_ens%02d.nc" % ensnum)
+    sla = ds.SSH.values
+    times = ds.time.values
+    lat = ds.lat.values
+    lon = ds.lon.values
+    ntime,nlat,nlon = sla.shape
+    print("Loaded data in %.2fs"%(time.time()-st))
+    
+    # Recoarsen the data outside
+    tol  = 2.5
+    deg  = 5
+    sla_5deg,lat5,lon5 = coarsen_byavg(sla,lat,lon,deg,tol)
+    
+    
+    # Save result
+    ds_coarse = xr.DataArray(sla_5deg,
+                coords={'time':times,'lat':lat5,'lon':lon5},
+                dims={'time':times,'lat':lat5,'lon':lon5},
+                name='SSH')
+    outname = coarsedir + "SSH_coarse_ens%02d.nc" % ensnum
+    ds_coarse.to_netcdf(outname,encoding={'SSH': {'zlib': True}})
+    
+
+#%%  Coarsen Data for PiC
+anom = True
+
+# Read in the data
+ds = xr.open_dataset(datpath+"SSH_PIC.nc")
+st = time.time()
+sla = ds.SSH.values
+times = ds.time.values
+lat = ds.lat.values
+lon = ds.lon.values
+ntime,nlat,nlon = sla.shape
+
+if anom:
+    sla = sla - sla.mean(0)[None,:,:]
+
+
+# Apply Smoothing (to full field)
+slasmooth = np.zeros((ntime,nlat,nlon))
+for i in tqdm(range(ntime)):
+    da = xr.DataArray(sla[i,:,:].astype('float32'),
+                    coords={'lat':lat,'lon':lon},
+                    dims={'lat':lat,'lon':lon},
+                    name='sla')
+    timestamp = times[i]
+    smooth_field = pygmt.grdfilter(grid=da, filter="g500", distance="4",nans="i")
+    slasmooth[i,:,:] = smooth_field.values
+
+
+# Reapply Mask to correct for smoothed edges
+mask = sla.sum(0)
+mask[~np.isnan(mask)] = 1
+sla_filt = slasmooth * mask[None,:,:]
+    
+
+# Save Smoothing (If option is set)
+if savesmooth:
+    ds_smooth = xr.DataArray(sla_filt,
+                coords={'time':times,'lat':lat,'lon':lon},
+                dims={'time':times,'lat':lat,'lon':lon},
+                name='SSH')
+    outname = smoothdir + "SSHA_smoothed_PIC.nc" 
+    ds_smooth.to_netcdf(outname,encoding={'SSH': {'zlib': True}})
+    
+# Apply Regridding (coarse averaging for now)
+tol  = 2.5
+deg  = 5
+sla_5deg,lat5,lon5 = coarsen_byavg(sla_filt,lat,lon,deg,tol)
+
+
+# Save result
+ds_coarse = xr.DataArray(sla_5deg,
+            coords={'time':times,'lat':lat5,'lon':lon5},
+            dims={'time':times,'lat':lat5,'lon':lon5},
+            name='SSH')
+outname = coarsedir + "SSHA_coarse_PIC.nc"
+ds_coarse.to_netcdf(outname,encoding={'SSH': {'zlib': True}})
+    
+
+#%% Test TO see the differences
+
+
+    
+    
+    
