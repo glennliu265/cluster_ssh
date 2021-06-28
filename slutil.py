@@ -46,7 +46,7 @@ import tbx
 # %% Preprocessing
 # ----------------
 
-def remove_GMSL(ssh,lat,lon,times,tol=1e-10,viz=False,testpoint=[330,50]):
+def remove_GMSL(ssh,lat,lon,times,tol=1e-10,viz=False,testpoint=[330,50],awgt=False):
     """
     Parameters
     ----------
@@ -79,7 +79,13 @@ def remove_GMSL(ssh,lat,lon,times,tol=1e-10,viz=False,testpoint=[330,50]):
     Note: Add latitude weights for future update...
     """
     # Calculate GMSL (Not Area Weighted)
-    gmslrem = np.nanmean(ssh,(1,2))
+    if awgt is True:
+        print("Applying Area-weighted Average")
+        sshin = ssh.copy() # (nmon,nlat,nlon)
+        sshin = sshin.transpose(2,1,0)
+        gmslrem = proc.area_avg(sshin,[0,360,-90,90],lon,lat,1)
+    else:
+        gmslrem = np.nanmean(ssh,(1,2))
     
     if np.any(gmslrem>tol):
         # Remove GMSL
@@ -307,7 +313,7 @@ def calc_silhouette(distance_matrix,clusterout,nclusters):
 # -----------------
 
 
-def add_coast_grid(ax,bbox=[-180,180,-90,90],proj=None):
+def add_coast_grid(ax,bbox=[-180,180,-90,90],proj=None,leftlab=True,botlab=True):
     """
     Add Coastlines, grid, and set extent for geoaxes
     
@@ -333,6 +339,13 @@ def add_coast_grid(ax,bbox=[-180,180,-90,90],proj=None):
                   linewidth=2, color='gray', alpha=0.5, linestyle="dotted",lw=0.75)
     gl.right_labels = False
     gl.top_labels = False
+    
+    if leftlab is False:
+        gl.left_labels = False
+    if botlab is False:
+        gl.bottom_labels = False
+        
+    
     return ax
 
 def check_lpfilter(rawdata,lpdata,chkval,M,tw,dt=24*3600*30):
@@ -669,6 +682,84 @@ def get_regions():
              }
     return cmapn,regiondict
 
+def interp_2pt(sortvar,findk,viz=False):
+    """
+    Quick 2-point linear interpolation of values in sortvar.
+    Find index [np.floor(sortvar),np.floor(sortvar)+1]
+    and interpolate
+
+    Visualize result if viz=True    
+    """
+    # Get Bounds [round k down, k+1]
+    llo = int(np.floor(findk))
+    lhi = llo+1
+    interpval = np.interp(findk,[llo,lhi],[sortvar[llo],sortvar[lhi]])
+    
+    # Visualize if set
+    if viz is True:
+        fig,ax =plt.subplots(1,1)
+        ax.plot([llo,lhi],[sortvar[llo],sortvar[lhi]],marker="x")
+        ax.scatter(findk,interpval,marker="o")
+    return interpval
+    
+
+
+def calc_conf(invar,tails,conf,median=False,verbose=True):
+    
+    # Check if there are NaNs
+    if np.any(np.isnan(invar)):
+        if verbose:
+            print("Warning, NaNs detected!")
+        okpts = ~np.isnan(invar)
+        invar = invar[okpts]
+        
+    
+    N = len(invar)
+    
+    sortvar = invar.copy()
+    sortvar.sort()
+    
+    perc = (1 - conf)/tails
+    
+    
+    # Lower Bounds
+    lowid = perc*100
+    lowbnd = interp_2pt(sortvar,lowid,viz=False)
+    
+    # Upper bounds
+    hiid  = N - perc*100
+    hibnd = interp_2pt(sortvar,hiid,viz=False)
+    
+    # Mean
+    if median:
+        mu  = np.nanmedian(sortvar)
+    mu = np.nanmean(sortvar)
+    
+    return lowbnd,hibnd,mu
+
+def plothist(invar,tails,conf,nbins,col,ax=None,alpha=0.5,fill=True,lw=1,median=False):
+    if ax is None:
+        ax = plt.gca()
+    
+    # Calculate Bounds
+    lb,hb,mu = calc_conf(invar,tails,conf,median=median)
+    ax.hist(invar,nbins,alpha=alpha,color=col,edgecolor=col,fill=fill,linewidth=lw)
+    ax.axvline(lb,ls='dashed',color='k',label="Lower Bound = %.3e" % (lb))
+    ax.axvline(mu,ls='solid',color='k',label="Mean = %.3e" % (mu),lw=2)
+    ax.axvline(hb,ls='dashed',color='k',label="Upper Bound = %.3e" % (hb))
+    
+    return ax
+
+def load_msk_5deg():
+    start = '1993-01'
+    end   = '2013-01'
+    datpath = '/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/'
+    ld = np.load("%sSSHA_AVISO_%sto%s.npz" % (datpath,start,end),allow_pickle=True)
+    sla_5deg = ld['sla_5deg']
+    msk = sla_5deg.sum(0)
+    msk[~np.isnan(msk)] = 1
+    plt.pcolormesh(msk)
+    return msk
 
 # --------------------------
 #%% Clustering, main scripts
@@ -883,8 +974,6 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
         if viz:
             # Visualize Results
             fig,ax,fig1,ax1 = plot_results(clustered,uncert,expname,lat,lon,outfigpath,nclusters)
-            
-
         
         # Check cluster counts
         for i in range(nclusters):
