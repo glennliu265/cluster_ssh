@@ -311,6 +311,7 @@ def plothist(invar,tails,conf,nbins,col,ax=None,alpha=0.5,fill=True,lw=1,median=
 conf  = 0.95
 tails = 2
 perc  = (1-conf)/2*100
+plotsep = True
 
 #invar = sscore[1]
 #lb,hb,mu = calc_conf(invar,tails,conf)
@@ -318,24 +319,48 @@ perc  = (1-conf)/2*100
 nbins = 50
 
 
-
-fig,axs = plt.subplots(2,1,sharey=True,sharex=True)
-
-ax = axs[0]
+if plotsep:
+    fig,ax = plt.subplots(1,1,sharey=True,sharex=False,figsize=(6,3))
+else:
+    fig,axs = plt.subplots(2,1,sharey=True,sharex=True,figsize=(6,7))
+    ax = axs[0]
+    
 ax = plothist(sscore[0],tails,conf,nbins,'b',ax=ax)
 ax.grid(True,ls='dotted',zorder=-1)
 ax.legend(fontsize=10)
-ax.set_title("White Noise Maps ($1\sigma=$%.2e)" % np.std(sscore[0]))
+ax.set_title("Silhouette Score Histogram (White Noise)")
+#ax.set_title("White Noise Maps ($1\sigma=$%.2e)" % np.std(sscore[0]))
 
-ax = axs[1]
+
+
+if plotsep:
+    xtk = ax.get_xticks()
+    xlm = ax.get_xlim()
+    ax.set_xlim(xlm)
+    ax.set_xticks(xtk)
+    plt.savefig("%sSilhouetteScore_Histogram_Synthetic_WhiteNoise.png"%(outfigpath),
+            dpi=150,bbox_tight='inches')
+    fig,ax = plt.subplots(1,1,sharey=True,sharex=False,figsize=(6,3))
+    
+else:
+    ax = axs[1]
+    
 ax = plothist(sscore[1],tails,conf,nbins,'r',ax=ax)
 ax.grid(True,ls='dotted',zorder=-1)
 ax.legend(fontsize=10)
-ax.set_title("Red Noise Maps ($1\sigma=$%.2e)" % np.std(sscore[1]))
+ax.set_title("Silhouette Score Histogram (Red Noise)")
+#ax.set_title("Red Noise Maps ($1\sigma=$%.2e)" % np.std(sscore[1]))
 
-plt.suptitle("Silhouette Score for Clustering Results")
-plt.savefig("%sSilhouetteScore_Histogram_Synthetic.png"%(outfigpath),
+if plotsep:
+     ax.set_xlim(xlm)
+     ax.set_xticks(xtk)
+     
+     plt.savefig("%sSilhouetteScore_Histogram_Synthetic_RedNoise.png"%(outfigpath),
             dpi=150,bbox_tight='inches')
+else:
+    plt.suptitle("Silhouette Score for Clustering Results")
+    plt.savefig("%sSilhouetteScore_Histogram_Synthetic.png"%(outfigpath),
+                dpi=150,bbox_tight='inches')
 
 
 

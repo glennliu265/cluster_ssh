@@ -42,7 +42,7 @@ import tbx
 
 # Set Paths
 datpath    = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/"
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210428/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210510/"
 
 # Experiment Names
 start       = '1993-01'
@@ -274,8 +274,8 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000):
 #%% Load in the dataset
 
 # Load data (preproc, then anomalized)
-st = time.time()
-ds = xr.open_dataset("%sSSH_coarse_ens%02d.nc"%(datpath,ensnum))
+st  = time.time()
+ds  = xr.open_dataset("%sSSH_coarse_ens%02d.nc"%(datpath,ensnum))
 ssh = ds.SSH.values/100 # Convert to meters
 lat5 = ds.lat.values
 lon5 = ds.lon.values
@@ -520,3 +520,6 @@ fig.colorbar(pcm,ax=ax)
 ax.set_title("Removed Points")
 plt.savefig("%sRemovedPoints_by_Iteration.png" % (expdir),dpi=200)
 plt.pcolormesh(lon5,lat5,rempts)
+
+
+

@@ -47,7 +47,7 @@ from statsmodels.regression import linear_model
 
 # Set Paths
 datpath    = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/"
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210603/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210610/"
 
 # Experiment Names
 start       = '1993-01'
@@ -73,7 +73,7 @@ print(expname)
 
 #Make Folders
 #expdir = outfigpath+expname +"/"
-expdir = outfigpath+"../20210603/"
+expdir = outfigpath+"../20210610/"
 checkdir = os.path.isdir(expdir)
 if not checkdir:
     print(expdir + " Not Found!")
