@@ -43,7 +43,7 @@ import tbx
 
 # Set Paths
 datpath    = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/"
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210603/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210610/"
 
 # Experiment Names
 start       = '1993-01'
@@ -306,7 +306,7 @@ lonf = 330
 latf = 50
 if rem_gmsl:
     print("Removing GMSL")
-    out1 = slutil.remove_GMSL(ssha,lat5,lon5,timesyr,viz=True,testpoint=[lonf,latf])
+    out1 = slutil.remove_GMSL(ssha,lat5,lon5,timesyr,viz=True,testpoint=[lonf,latf],awgt=True)
     
     if len(out1)>2:
         ssha,gmslrem,fig,ax = out1
@@ -409,7 +409,6 @@ proj = ccrs.PlateCarree(central_longitude=180)
 # Rearrange clustering number
 clusternew,remapdict = slutil.remapcluster(clusterin,lat5,lon5,regiondict,returnremap=True)
 
-
 # -------------
 # Plot Clusters
 # -------------
@@ -449,6 +448,108 @@ if sameplot:
     plt.savefig("%s%s_Cluster_and_Uncert.png"%(expdir,expname),dpi=200,bbox_inches='tight')
 else:
     plt.savefig("%s%s_ClustersUncert.png"%(expdir,expname),dpi=200,bbox_inches='tight')
+
+#%% Clustering mape with silhouette
+
+sigval = 0
+
+# Dictionary of Bounding Boxes to search thru
+# Inputs
+clusterin = allclusters[-1]
+uncertin = alluncert[-1]
+s_in = alls[-1]
+rempts = remptsall
+vlm = [-10,10]
+nclusters = 6
+
+sameplot=True
+
+# Make Region Colors
+cmapn,regiondict = slutil.get_regions()
+
+# rempts = rempts.flatten()
+# rempts[~np.isnan(rempts)] = 1
+# rempts = rempts.reshape(nlat5,nlon5)
+
+proj = ccrs.PlateCarree(central_longitude=180)
+
+# Rearrange clustering number
+clusternew,remapdict = slutil.remapcluster(clusterin,lat5,lon5,regiondict,returnremap=True)
+
+
+clusterout,knan,okpts = proc.find_nan((clusternew).flatten(),0)
+
+# -------------
+# Plot Clusters
+# -------------
+if sameplot:
+    fig,axs = plt.subplots(1,2,subplot_kw={'projection':proj},figsize=(12,4))
+    ax = axs[0]
+else:
+    fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax     = viz.add_coast_grid(ax)
+pcm    = ax.pcolormesh(lon5,lat5,clusternew,cmap=cmapn,transform=ccrs.PlateCarree())
+#ax.pcolor(lon5,lat5,rempts,cmap='Greys',transform=ccrs.PlateCarree(),hatch=":")
+for o in range(nlon5):
+    for a in range(nlat5):
+        pt = rempts[a,o]
+        if np.isnan(pt):
+            continue
+        else:
+            ax.scatter(lon5[o],lat5[a],s=10,marker="x",color="k",transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title("AVISO Clusters (%s to %s)"%(start,end))
+if sameplot:
+    ax = axs[1]
+else:
+    plt.savefig("%s%s_ClustersMap.png"%(expdir,expname),dpi=200,bbox_inches='tight')
+    fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    
+    
+
+# Plot 1: the silhoutte value map
+cmap="RdBu_r"
+silmap = np.zeros(nlat5*nlon5)*np.nan
+silmap[okpts] = s_in
+silmap = silmap.reshape(nlat5,nlon5)
+
+proj = ccrs.PlateCarree(central_longitude=180)
+#fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax     = slutil.add_coast_grid(ax)
+pcm=ax.pcolormesh(lon5,lat5,silmap,vmin=-.25,vmax=.25,cmap=cmap,transform=ccrs.PlateCarree())
+ax.contour(lon5,lat5,silmap,levels=[sigval],colors='k',linewidths=0.75,linestyles=":",transform=ccrs.PlateCarree())
+ax.pcolormesh(lon5,lat5,silmap,vmin=-.5,vmax=.5,cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title("Silhouette Map ($s_{avg}=%.2e$)"%(s_in.mean()))
+
+
+
+if sameplot:
+    plt.savefig("%s%s_Cluster_and_Silmap.png"%(expdir,expname),dpi=200,bbox_inches='tight')
+else:
+    plt.savefig("%s%s_ClustersUncert.png"%(expdir,expname),dpi=200,bbox_inches='tight')
+
+
+
+
+
+#%%
+
+#
+# Plot Silhouette Map
+#
+silmap = np.zeros(nlat5*nlon5)*np.nan
+silmap[okpts] = s_in
+silmap = silmap.reshape(nlat5,nlon5)
+proj = ccrs.PlateCarree(central_longitude=180)
+fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+ax     = viz.add_coast_grid(ax)
+pcm=ax.pcolormesh(lon5,lat5,silmap,vmin=-.5,vmax=.5,cmap=cmap,transform=ccrs.PlateCarree())
+ax.contour(lon5,lat5,silmap,levels=[0],colors='k',linewidths=0.75,linestyles=":",transform=ccrs.PlateCarree())
+#ax.pcolormesh(lon5,lat5,silmap,vmin=-.5,vmax=.5,cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+fig.colorbar(pcm,ax=ax,fraction=0.025)
+ax.set_title("Silhouette Values for CESM-PiC Clusters (Year %s) \n $s_{avg}$ = %.3f" % (yearstr,s_in.mean()))
+plt.savefig("%sCESM1PIC_%s_SilhouetteMap_k%s%i_%s_gmslnew.png"%(outfigpath,expname,kmode,ii,yearstr),dpi=200,bbox_inches='tight')
 
 
 

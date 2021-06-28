@@ -803,7 +803,7 @@ else:
 #%% Plot results again, but this time with the silhouette metric
 
 
-sigval = 4.115e-3 # Significance Value (Greater than Red-Noise Null Hypothesis)
+sigval = 0 #4.115e-3 # Significance Value (Greater than Red-Noise Null Hypothesis)
 
 # Dictionary of Bounding Boxes to search thru
 # Inputs
@@ -868,7 +868,7 @@ silmap = silmap.reshape(nlat5,nlon5)
 
 proj = ccrs.PlateCarree(central_longitude=180)
 #fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
-ax     = slutil.add_coast_grid(ax,leftlab=False,botlab=False)
+ax     = slutil.add_coast_grid(ax)
 pcm=ax.pcolormesh(lon5,lat5,silmap,vmin=-.25,vmax=.25,cmap=cmap,transform=ccrs.PlateCarree())
 # for o in range(nlon5):
 #     for a in range(nlat5):
