@@ -75,8 +75,76 @@ else:
     print(expdir+" was found!")
 #%% Functions
 
+def monte_carlo_cluster(uncertpt,covpt,N_in,mciter=1000,p=0.05,tails=2):
+    """
+    
+    result = monte_carlo_cluster(uncertpt,covpt,N_in,mciter=1000,p=0.05,tails=2)
+    
+    Perform monte carlo significance test on the uncertainty metric
+    [uncertpt] for a clustering output. 
+    
+    Repeats uncertainty calculation of N_in randomly selected points and
+    checks to yield a distribution. Uses the significance level [p] (two-tailed)
+    to see if the computed uncertainty [uncertpt] occured by chance.
+
+    Parameters
+    ----------
+    uncertpt : FLOAT
+        Uncertainty value for target point [mean(cov_in)/mean(cov_out)]
+    covpt : ARRAY [number of pts]
+        Covariance of the point with all other points
+    N_in : INT
+        Points within the cluster
+    mciter : INT, optional
+        Number of iterations. The default is 1000.
+    p : FLOAT, optional
+        Significance level. The default is 0.05.
+
+    Returns
+    -------
+    1 or 0 : BOOL
+        1: uncert value is significant (outside randomly generated distr.)
+        0: uncert value is not significant (within randomly generated distr.)
+
+    """
+    
+    # Assumes 2-tailed distribution (splits sig level to top/bottom of distr.)
+    ptilde   = p/2
+    
+    # Get total point count
+    N_tot   = len(covpt) # Total Points
+    
+    # Bootstrapping section
+    mcuncert = np.zeros(mciter) # Output distribution
+    for m in range(mciter):
+        
+        # Create index and shuffle
+        shuffidx = np.arange(0,N_tot)
+        np.random.shuffle(shuffidx) # Shuffles in place
+        
+        # Get first N_in last N_out points 
+        pts_in  = covpt[shuffidx[:N_in]]
+        pts_out = covpt[shuffidx[N_in:]]
+        
+        # Compute uncertainty ratio
+        mcuncert[m] = np.mean(pts_in)/np.mean(pts_out)
+    
+    # Sort data, and find the significance thresholds (conservative)
+    mcuncert.sort()
+    id_lower = int(np.ceil(mciter*ptilde))
+    id_upper = int(np.floor(mciter*(1-ptilde)))
+    lowerbnd = mcuncert[id_lower]
+    upperbnd = mcuncert[id_upper]
+    
+    # Check for significance
+    if (uncertpt>lowerbnd) and (uncertpt<upperbnd):
+        return 0 # Point is within randomly generated distribution
+    else: # Point is outside randomly generated distribution
+        return 1
+
 def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
                 returnall=False):
+    
     # Remove All NaN Points
     ntime,nlat,nlon = sla.shape
     slars = sla.reshape(ntime,nlat*nlon)
@@ -121,13 +189,21 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
     # Calculate the uncertainty
     # -------------------------
     uncertout = np.zeros(clusterout.shape)
+    uncertsig  = np.zeros(clusterout.shape)
     for i in range(len(clusterout)):
         covpt     = scov[i,:]     # 
         cid       = clusterout[i] #
         covin     = covpt[np.where(clusterout==cid)]
         covout    = covpt[np.where(clusterout!=cid)]
-        uncertout[i] = np.mean(covin)/np.mean(covout)
-
+        uncertpt  = np.mean(covin)/np.mean(covout)
+        uncertout[i] = uncertpt
+        
+        # --------------------------------------------
+        # Monte-Carlo Analysis to compute significance
+        # --------------------------------------------
+        sigpt = monte_carlo_cluster(uncertpt,covpt,len(covin),mciter=1000,p=0.05,tails=2)
+        uncertsig[i] = sigpt
+        
     # Apply rules from Thompson and Merrifield (Do this later)
     # if uncert > 2, set to 2
     # if uncert <0.5, set to 0
@@ -151,8 +227,8 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
     uncert = uncert.reshape(nlat,nlon)
     
     if returnall:
-        return clustered,uncert,cluster_count,srho,scov,sdist,distance_matrix
-    return clustered,uncert,cluster_count
+        return clustered,uncert,uncertsig,cluster_count,srho,scov,sdist,distance_matrix
+    return clustered,uncert,uncertsig,cluster_count
 
 
 

@@ -764,6 +764,77 @@ def load_msk_5deg():
 # --------------------------
 #%% Clustering, main scripts
 # --------------------------
+
+def monte_carlo_cluster(uncertpt,covpt,N_in,uncertmode,mciter=1000,p=0.05,tails=2):
+    """
+    
+    result = monte_carlo_cluster(uncertpt,covpt,N_in,mciter=1000,p=0.05,tails=2)
+    
+    Perform monte carlo significance test on the uncertainty metric
+    [uncertpt] for a clustering output. 
+    
+    Repeats uncertainty calculation of N_in randomly selected points and
+    checks to yield a distribution. Uses the significance level [p] (two-tailed)
+    to see if the computed uncertainty [uncertpt] occured by chance.
+
+    Parameters
+    ----------
+    uncertpt : FLOAT
+        Uncertainty value for target point [mean(cov_in)/mean(cov_out)]
+    covpt : ARRAY [number of pts]
+        Covariance of the point with all other points
+    N_in : INT
+        Points within the cluster
+    uncertmode: 0 or 1
+        0 take mean of selected values
+        1 take median of selected values
+    mciter : INT, optional
+        Number of iterations. The default is 1000.
+    p : FLOAT, optional
+        Significance level. The default is 0.05.
+
+    Returns
+    -------
+    1 or 0 : BOOL
+        1: uncert value is significant (outside randomly generated distr.)
+        0: uncert value is not significant (within randomly generated distr.)
+
+    """
+    
+    # Assumes 2-tailed distribution (splits sig level to top/bottom of distr.)
+    ptilde   = p/2
+    
+    # Get total point count
+    N_tot   = len(covpt) # Total Points
+    
+    # Bootstrapping section
+    mcuncert = np.zeros(mciter) # Output distribution
+    for m in range(mciter):
+        
+        # Create index and shuffle
+        shuffidx = np.arange(0,N_tot)
+        np.random.shuffle(shuffidx) # Shuffles in place
+        
+        # Get first N_in last N_out points 
+        pts_in  = covpt[shuffidx[:N_in]]
+        pts_out = covpt[shuffidx[N_in:]]
+        
+        # Compute uncertainty ratio
+        mcuncert[m] = np.mean(pts_in)/np.mean(pts_out)
+    
+    # Sort data, and find the significance thresholds (conservative)
+    mcuncert.sort()
+    id_lower = int(np.ceil(mciter*ptilde))
+    id_upper = int(np.floor(mciter*(1-ptilde)))
+    lowerbnd = mcuncert[id_lower]
+    upperbnd = mcuncert[id_upper]
+    
+    # Check for significance
+    if (uncertpt>lowerbnd) and (uncertpt<upperbnd):
+        return 0 # Point is within randomly generated distribution
+    else: # Point is outside randomly generated distribution
+        return 1
+
 def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
                 returnall=False,absmode=0,distmode=0,uncertmode=0,printmsg=True,
                 calcsil=False):
@@ -805,7 +876,6 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
     linked     = linkage(cdist,'weighted')
     clusterout = fcluster(linked, nclusters,criterion='maxclust')
     
-    
     # --------------------
     # Calculate Silhouette
     # --------------------
@@ -818,17 +888,23 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
     # Calculate the uncertainty
     # -------------------------
     uncertout = np.zeros(clusterout.shape)
+    uncertsig  = np.zeros(clusterout.shape)
     for i in range(len(clusterout)):
         covpt     = scov[i,:]     # 
         cid       = clusterout[i] #
         covin     = covpt[np.where(clusterout==cid)]
         covout    = covpt[np.where(clusterout!=cid)]
-        
         if uncertmode == 0:
-            uncertout[i] = np.mean(covin)/np.mean(covout)
+            uncertpt  = np.mean(covin)/np.mean(covout)
         elif uncertmode == 1:
             uncertout[i] = np.median(covin)/np.median(covout)
-
+        uncertout[i] = uncertpt
+        
+        # --------------------------------------------
+        # Monte-Carlo Analysis to compute significance
+        # --------------------------------------------
+        sigpt = monte_carlo_cluster(uncertpt,covpt,len(covin),uncertmode,mciter=1000,p=0.05,tails=2)
+        uncertsig[i] = sigpt
     # Apply rules from Thompson and Merrifield (Do this later)
     # if uncert > 2, set to 2
     # if uncert <0.5, set to 0
@@ -867,10 +943,10 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
     uncert = uncert.reshape(nlat,nlon)
     
     if calcsil: # Return silhouette values
-        return clustered,uncert,cluster_count,Wk,s,s_bycluster
+        return clustered,uncert,uncertsig,cluster_count,Wk,s,s_bycluster
     if returnall:
-        return clustered,uncert,cluster_count,Wk,srho,scov,sdist,distance_matrix
-    return clustered,uncert,cluster_count,Wk
+        return clustered,uncert,uncertsig,cluster_count,Wk,srho,scov,sdist,distance_matrix
+    return clustered,uncert,uncertsig,cluster_count,Wk
 
 def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath,nclusters):
     
@@ -934,9 +1010,10 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
     slain = sla.copy()
     
     # Preallocate
-    allclusters = []
-    alluncert   = []
-    allcount    = []
+    allclusters  = []
+    alluncert    = []
+    alluncertsig = []
+    allcount     = []
     allWk = []
     if calcsil:
         alls           = []
@@ -959,15 +1036,16 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
                                                      printmsg=printmsg,calcsil=calcsil)
         
         if calcsil:
-            clustered,uncert,cluster_count,Wk,s,s_byclust = clustoutput
+            clustered,uncert,uncertsig,cluster_count,Wk,s,s_byclust = clustoutput
             alls.append(s)
             alls_byclust.append(s_byclust)
         else:
-            clustered,uncert,cluster_count,Wk = clustoutput
+            clustered,uncert,uncertsig,cluster_count,Wk = clustoutput
         
         # Save results
         allclusters.append(clustered)
         alluncert.append(uncert)
+        alluncertsig.append(uncertsig)
         allcount.append(cluster_count)
         allWk.append(Wk)
         
@@ -1002,6 +1080,6 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
         print("COMPLETE after %i iterations"%it)
     rempts = rempts.reshape(nlat,nlon)
     if calcsil:
-        return allclusters,alluncert,allcount,rempts,allWk,alls,alls_byclust
-    return allclusters,alluncert,allcount,rempts,allWk
+        return allclusters,alluncert,alluncertsig,allcount,rempts,allWk,alls,alls_byclust
+    return allclusters,alluncert,alluncertsig,allcount,rempts,allWk
 
