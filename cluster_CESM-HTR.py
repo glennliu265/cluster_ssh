@@ -57,7 +57,7 @@ end          = '2005-12'
 e            = 0  # Ensemble index (ensnum-1), remove after loop is developed
 
 nclusters    = 6
-rem_gmsl     = True
+rem_gmsl     = False
 maxiter      = 5  # Number of iterations for elimiting points
 minpts       = 30 # Minimum points per cluster
 
@@ -91,6 +91,10 @@ ncnames    = []
 for e in range(40):
     ensnum  = e+1
     ncnames.append("SSH_coarse_ens%02i.nc" % ensnum)
+    
+    
+# Set/load some other things
+cmbal = cmocean.cm.balance
 
 #%% Functions
 
@@ -342,156 +346,162 @@ def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
 # -------------------------------------
 #%% Load in the dataset and preprocess
 # -------------------------------------
-vizplots = False # Visualize plots during the calculations
-verbose  = False # 
-
-# Set/load some other things
-cmbal = cmocean.cm.balance
+reprocess = True # Reprocess
+vizplots = False  # Visualize plots during the calculations
+verbose  = False   
 
 # Load mask from AVISO
 mask = np.load(datpath+"AVISO_landice_mask_5deg.npy")
 
-for e in tqdm(range(40)):
-    
-    # Load data (preproc, then anomalized)
-    st  = time.time()
-    ds  = xr.open_dataset("%s%s"%(datpath,ncnames[e]))
-    ds  = ds.sel(time=slice(start,end))
-    ssh = ds.SSH.values/100 # Convert to meters
-    lat5 = ds.lat.values
-    lon5 = ds.lon.values
-    times = ds.time.values
-    ntime,nlat5,nlon5 = ssh.shape
-    if verbose:
-        print("Loaded data in %.2fs"%(time.time()-st))
-    
-    # Set up time array
-    timesmon = np.array(["%04d-%02d"%(t.year,t.month) for t in times])
-
-    #% Work 
-    # ------------------------------
-    # Apply land ice mask from aviso
-    # ------------------------------
-    ssha = ssh * mask[None,:,:]
-    
-    # ------------------
-    # Remove GMSL Signal
-    # ------------------
-    lonf    = 330
-    latf    = 50
-    timesyr = np.arange(0,int(len(times)/12)) 
-    if rem_gmsl>0:
-        if verbose:
-            print("Removing GMSL")
-        out1 = slutil.remove_GMSL(ssha,lat5,lon5,timesyr,viz=True,testpoint=[lonf,latf],awgt=True)
+if reprocess:
+    for e in tqdm(range(40)):
         
-        if len(out1)>2:
-            ssha,gmslrem,fig,ax = out1
-            plt.savefig(expdir+"GMSL_Removal_CESM_ens%i_testpoint_lon%i_lat%i.png"%(ensnum,lonf,latf),dpi=200)
-        else:
-            ssha,gmsl=out1
-            
-        if np.all(np.abs(gmslrem)>(1e-10)):
+        # Load data (preproc, then anomalized)
+        st  = time.time()
+        ds  = xr.open_dataset("%s%s"%(datpath,ncnames[e]))
+        ds  = ds.sel(time=slice(start,end))
+        ssh = ds.SSH.values/100 # Convert to meters
+        lat5 = ds.lat.values
+        lon5 = ds.lon.values
+        times = ds.time.values
+        ntime,nlat5,nlon5 = ssh.shape
+        if verbose:
+            print("Loaded data in %.2fs"%(time.time()-st))
+        
+        # Set up time array
+        timesmon = np.array(["%04d-%02d"%(t.year,t.month) for t in times])
+    
+        #% Work 
+        # ------------------------------
+        # Apply land ice mask from aviso
+        # ------------------------------
+        ssha = ssh * mask[None,:,:]
+        
+        # ------------------
+        # Remove GMSL Signal
+        # ------------------
+        lonf    = 330
+        latf    = 50
+        timesyr = np.arange(0,int(len(times)/12)) 
+        if rem_gmsl>0:
             if verbose:
-                print("Saving GMSL")
-            #np.save(datpath+"CESM1_ens%i_GMSL_%s_%s.npy"%(ensnum,start,end),gmslrem)
-    else:
-        if verbose:
-            print("GMSL Not Removed")
-    
-    # ---------------------
-    # Add in the Aviso GMSL
-    # ---------------------
-    if add_gmsl:
-        gmslav = np.load(datpath+"AVISO_GMSL_1993-01_2013-01.npy")
-        ssh_ori = ssha.copy()
-        ssha += gmslav[:,None,None]
+                print("Removing GMSL")
+            out1 = slutil.remove_GMSL(ssha,lat5,lon5,timesyr,viz=True,testpoint=[lonf,latf],awgt=True)
+            
+            if len(out1)>2:
+                ssha,gmslrem,fig,ax = out1
+                plt.savefig(expdir+"GMSL_Removal_CESM_ens%i_testpoint_lon%i_lat%i.png"%(ensnum,lonf,latf),dpi=200)
+            else:
+                ssha,gmsl=out1
+                
+            if np.all(np.abs(gmslrem)>(1e-10)):
+                if verbose:
+                    print("Saving GMSL")
+                #np.save(datpath+"CESM1_ens%i_GMSL_%s_%s.npy"%(ensnum,start,end),gmslrem)
+        else:
+            if verbose:
+                print("GMSL Not Removed")
         
+        # ---------------------
+        # Add in the Aviso GMSL
+        # ---------------------
+        if add_gmsl:
+            gmslav = np.load(datpath+"AVISO_GMSL_1993-01_2013-01.npy")
+            ssh_ori = ssha.copy()
+            ssha += gmslav[:,None,None]
+            
+            if vizplots:
+                fig,ax = plt.subplots(1,1)
+                ax.plot(gmslav,label="GMSL")
+                ax.plot()
+                
+                klon,klat = proc.find_latlon(lonf,latf,lon5,lat5)
+                fig,ax = plt.subplots(1,1)
+                #ax.set_xticks(np.arange(0,len(times)+1,12))
+                ax.set_xticks(np.arange(0,len(timesyr),12))
+                ax.set_xticklabels(timesyr[::12],rotation = 45)
+                ax.grid(True,ls='dotted')
+                
+                ax.plot(ssh_ori[:,klat,klon],label="Original",color='k')
+                ax.plot(ssha[:,klat,klon],label="After Addition")
+                ax.plot(gmslav,label="AVISO-GMSL")
+                
+                ax.legend()
+                ax.set_title("GMSL Addition at Lon %.2f Lat %.2f (%s to %s)" % (lon5[klon],lat5[klat],timesyr[0],timesyr[-1]))
+                ax.set_ylabel("SSH (m)")
+                plt.savefig(expdir+"GMSL_Addition.png",dpi=150)
+        else:
+            if verbose:
+                print("No GMSL Added!")
+        
+        # ----------------------
+        #% Design Low Pass Filter
+        # ----------------------
+        ntimer   = ssha.shape[0]
+        
+        # ---
+        # Apply LP Filter
+        # ---
+        # Filter Parameters and Additional plotting options
+        dt   = 24*3600*30
+        M    = 5
+        xtk  = [1/(10*12*dt),1/(24*dt),1/(12*dt),1/(3*dt),1/dt]
+        xtkl = ['decade','2-yr','year','season','month']
+        order  = 5
+        tw     = 18 # filter size for time dim
+        sla_lp = slutil.lp_butter(ssha,tw,order)
+        
+        #% Remove NaN points and Examine Low pass filter
+        slars = sla_lp.reshape(ntimer,nlat5*nlon5)
+        
+        # ---
+        # Locate points where values are all zero
+        # ---
+        tsum     = slars.sum(0)
+        zero_pts = np.where(tsum==0)[0]
+        ptmap    = np.array(tsum==0)
+        slars[:,zero_pts] = np.nan
+        ptmap = ptmap.reshape(nlat5,nlon5)
+        # Map removed points
         if vizplots:
-            fig,ax = plt.subplots(1,1)
-            ax.plot(gmslav,label="GMSL")
-            ax.plot()
-            
-            klon,klat = proc.find_latlon(lonf,latf,lon5,lat5)
-            fig,ax = plt.subplots(1,1)
-            #ax.set_xticks(np.arange(0,len(times)+1,12))
-            ax.set_xticks(np.arange(0,len(timesyr),12))
-            ax.set_xticklabels(timesyr[::12],rotation = 45)
-            ax.grid(True,ls='dotted')
-            
-            ax.plot(ssh_ori[:,klat,klon],label="Original",color='k')
-            ax.plot(ssha[:,klat,klon],label="After Addition")
-            ax.plot(gmslav,label="AVISO-GMSL")
-            
-            ax.legend()
-            ax.set_title("GMSL Addition at Lon %.2f Lat %.2f (%s to %s)" % (lon5[klon],lat5[klat],timesyr[0],timesyr[-1]))
-            ax.set_ylabel("SSH (m)")
-            plt.savefig(expdir+"GMSL_Addition.png",dpi=150)
-    else:
-        if verbose:
-            print("No GMSL Added!")
+            fig,ax = plt.subplots(1,1,subplot_kw={'projection':ccrs.PlateCarree(central_longitude=0)})
+            ax     = slutil.add_coast_grid(ax)
+            pcm = ax.pcolormesh(lon5,lat5,ptmap,cmap='bone',transform=ccrs.PlateCarree(),alpha=0.88)
+            fig.colorbar(pcm,ax=ax)
+            ax.set_title("Removed Zero Points")
+        
+        # ---
+        # Visualize Filter Transfer Function
+        # ---
+        okdata,knan,okpts = proc.find_nan(slars,0)
+        npts5   = okdata.shape[1]
+        lpdata  = okdata.copy()
+        rawdata = ssha.reshape(ntimer,nlat5*nlon5)[:,okpts]
+        if vizplots:
+            lpspec,rawspec,p24,filtxfer,fig,ax=slutil.check_lpfilter(rawdata,lpdata,xtk[1],M,tw,dt=24*3600*30)
+            plt.savefig("%sFilter_Transfer_%imonLP_%ibandavg_%s.png"%(expdir,tw,M,expname),dpi=200)
+        
+        # ---
+        # Save results
+        # ---
+        if savesteps: # Save low-pass-filtered result, right before clustering
+            outname = "%sSSHA_LP_%s_order%i_cutoff%i_ens%02d.npz" % (datpath,datname,order,tw,e+1)
+            if verbose:
+                print("Saved to: %s"%outname)
+            np.savez(outname,**{
+                'sla_lp':sla_lp,
+                'lon':lon5,
+                'lat':lat5,
+                'times':times
+                })
+else:
     
-    # ----------------------
-    #% Design Low Pass Filter
-    # ----------------------
-    ntimer   = ssha.shape[0]
-    
-    # ---
-    # Apply LP Filter
-    # ---
-    # Filter Parameters and Additional plotting options
-    dt   = 24*3600*30
-    M    = 5
-    xtk  = [1/(10*12*dt),1/(24*dt),1/(12*dt),1/(3*dt),1/dt]
-    xtkl = ['decade','2-yr','year','season','month']
     order  = 5
     tw     = 18 # filter size for time dim
-    sla_lp = slutil.lp_butter(ssha,tw,order)
-    
-    #% Remove NaN points and Examine Low pass filter
-    slars = sla_lp.reshape(ntimer,nlat5*nlon5)
-    
-    # ---
-    # Locate points where values are all zero
-    # ---
-    tsum     = slars.sum(0)
-    zero_pts = np.where(tsum==0)[0]
-    ptmap    = np.array(tsum==0)
-    slars[:,zero_pts] = np.nan
-    ptmap = ptmap.reshape(nlat5,nlon5)
-    # Map removed points
-    if vizplots:
-        fig,ax = plt.subplots(1,1,subplot_kw={'projection':ccrs.PlateCarree(central_longitude=0)})
-        ax     = slutil.add_coast_grid(ax)
-        pcm = ax.pcolormesh(lon5,lat5,ptmap,cmap='bone',transform=ccrs.PlateCarree(),alpha=0.88)
-        fig.colorbar(pcm,ax=ax)
-        ax.set_title("Removed Zero Points")
-    
-    # ---
-    # Visualize Filter Transfer Function
-    # ---
-    okdata,knan,okpts = proc.find_nan(slars,0)
-    npts5   = okdata.shape[1]
-    lpdata  = okdata.copy()
-    rawdata = ssha.reshape(ntimer,nlat5*nlon5)[:,okpts]
-    if vizplots:
-        lpspec,rawspec,p24,filtxfer,fig,ax=slutil.check_lpfilter(rawdata,lpdata,xtk[1],M,tw,dt=24*3600*30)
-        plt.savefig("%sFilter_Transfer_%imonLP_%ibandavg_%s.png"%(expdir,tw,M,expname),dpi=200)
-    
-    # ---
-    # Save results
-    # ---
-    if savesteps: # Save low-pass-filtered result, right before clustering
-        outname = "%sSSHA_LP_%s_order%i_cutoff%i_ens%02d.npz" % (datpath,datname,order,tw,e+1)
-        if verbose:
-            print("Saved to: %s"%outname)
-        np.savez(outname,**{
-            'sla_lp':sla_lp,
-            'lon':lon5,
-            'lat':lat5,
-            'times':times
-            })
-    
+    ldnames = []
+    for e in range(40):
+        ldnames.append("%sSSHA_LP_%s_order%i_cutoff%i_ens%02d.npz" % (datpath,datname,order,tw,e+1))
+        
 
 #%% Making the Regiondict
 from scipy import stats
@@ -715,64 +725,131 @@ rempt     = [nlat,nlon]
 
 
 #
-# %% First, Cluster for the whole PIC
+# %% First, Cluster for each individual member
 #
 
-sla_in = sla_lp[:,:,:]
+recalc_clust = True
 
-# Do Clustering
-allclusters,alluncert,allcount,rempt,allWk,alls,alls_byclust= slutil.elim_points(sla_in,lat5,lon5,nclusters,minpts,maxiter,expdir,
-                                                             viz=False,printmsg=True,calcsil=True)
+clusts     = []
+uncerts    = []
+uncertsigs = []
+counts     = []
+rempts     = []
+Wks        = []
+sscores    = []
+sbyclust   = []
 
+for e in range(40):
+    
+    
+    
+    # Load in the lp-filtered ssh values
+    # ----------------------------------
+    ldname = ldnames[e]
+    ld     = np.load(ldname,allow_pickle=True)
+    sla_in = ld['sla_lp']
+    if e == 0:
+        lon5 = ld['lon']
+        lat5 = ld['lat']
+        
+        
+    # Set output name
+    # ---------------
+    savename = "%sCESM_HTR_cluster_result_maxclust%i_minpt%i_maxiter%i_ens%02i.npz" % (datpath,nclusters,minpts,maxiter,e+1)
+    
 
-#%% Plot the results
+    if recalc_clust:
+        print("Recalculating clusters!")
+        # Do Clustering
+        # -------------
+        unpacker = slutil.elim_points(sla_in,lat5,lon5,nclusters,minpts,maxiter,expdir,
+                                                                     viz=False,printmsg=True,calcsil=True)
+        allclusters,alluncert,alluncertsig,allcount,rempt,allWk,alls,alls_byclust = unpacker
+        
+        #
+        # Save cluster output
+        # -------------------
+        np.savez(savename,**{
+            'allclusters'  : allclusters,
+            'alluncert'    : alluncert,
+            'alluncertsig' : alluncertsig,
+            'allcount'     : allcount,
+            'rempt'        : rempt,
+            'allWk'        : allWk,
+            'alls'         : alls,
+            'alls_byclust' : alls_byclust
+            })
+    else:
+        print("Directly loading pre-calculated clusters!")
+    
+    # Load the cluster results in
+    # --------------------
+    ld = np.load(savename,allow_pickle=True)
+    clusts.append(ld['allclusters'])       # [iteration x lat5 x lon5]
+    uncerts.append(ld['alluncert'])        # [iteration x lat5 x lon5]
+    uncertsigs.append(ld['alluncertsig'])  # [iteration x lat5 x lon5]
+    counts.append(ld['allcount'])          # [iteration x lat5 x lon5]
+    rempts.append(ld['rempt'])             # [iteration x cluster]
+    Wks.append(ld['allWk'])                # [iteration x cluster]
+    sscores.append(ld['alls'])             # [iteration]
+    sbyclust.append(ld['alls_byclust'])    # [iteration x cluster]
+    
+        
+        
+        
+        
+#%%
 
-
-
-# Dictionary of Bounding Boxes to search thru
-# Inputs
-clusterin = allclusters[-1]
-uncertin = alluncert[-1]
-rempts = rempt
-vlm = [-10,10]
-nclusters = 6
-
-
-start = '400-01'
-end = '2200-01'
-sameplot=True
+#%% Remap the custers
 
 # Make Region Colors
 cmapn,regiondict = slutil.get_regions()
 
-# rempts = rempts.flatten()
-# rempts[~np.isnan(rempts)] = 1
-# rempts = rempts.reshape(nlat5,nlon5)
-
-proj = ccrs.PlateCarree(central_longitude=180)
-
-# Rearrange clustering number
-clusternew,remapdict = slutil.remapcluster(clusterin,lat5,lon5,regiondict,returnremap=True)
-
-
+clusts_remap = []
+remapdicts   = []
+for e_sel in range(40):
+    
+    # Select the FINAL clustering result!!
+    clusterin = clusts[e_sel][-1]
+    uncertin  = uncerts[e_sel][-1]
+    remptsin  = rempts[e_sel]
+    
+    # Rearrange clustering number
+    clusternew,remapdict = slutil.remapcluster(clusterin,lat5,lon5,regiondict,returnremap=True)
+    clusts_remap.append(clusternew)
+    remapdicts.append(remapdict)
 # -------------
-# Plot Clusters
+#%% Plot Clusters
 # -------------
+
+# Plotting Options
+vlm       = [-10,10]
+nclusters = 6
+start     = '1920-01'
+end       = '2005-12'
+sameplot  = True
+proj      = ccrs.PlateCarree(central_longitude=180)
+nlon5     = len(lon5)
+nlat5     = len(lat5)
+
+e_sel     = 0
+
 if sameplot:
     fig,axs = plt.subplots(1,2,subplot_kw={'projection':proj},figsize=(12,4))
     ax = axs[0]
 else:
     fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
 ax     = viz.add_coast_grid(ax)
-pcm    = ax.pcolormesh(lon5,lat5,clusternew,cmap=cmapn,transform=ccrs.PlateCarree())
+pcm    = ax.pcolormesh(lon5,lat5,clusts_remap[e_sel],cmap=cmapn,transform=ccrs.PlateCarree())
 #ax.pcolor(lon5,lat5,rempts,cmap='Greys',transform=ccrs.PlateCarree(),hatch=":")
 for o in range(nlon5):
     for a in range(nlat5):
-        pt = rempts[a,o]
+        pt = rempts[e_sel][a,o]
         if np.isnan(pt):
             continue
         else:
             ax.scatter(lon5[o],lat5[a],s=10,marker="x",color="k",transform=ccrs.PlateCarree())
+
 fig.colorbar(pcm,ax=ax,fraction=0.025)
 ax.set_title("CESM1 Clusters (%s to %s)"%(start,end))
 if sameplot:
@@ -795,33 +872,47 @@ if sameplot:
 else:
     plt.savefig("%s%s_ClustersUncert.png"%(expdir,expname),dpi=200,bbox_inches='tight')
 
+#%% Plot for each ensemble member
 
+bboxplot = [-180,180,-70,70]
 
+fig,axs = plt.subplots(8,5,figsize=(24,16),
+                       subplot_kw={'projection':proj},constrained_layout=True)
 
-# inclust = np.array(allclusters[0])
-# inuncert = np.array(alluncert[0])
+for e in tqdm(range(40)):
+    ax = axs.flatten()[e]
+    ax = viz.add_coast_grid(ax,fill_color="k",blabels=[0,0,0,0],bbox=bboxplot)
+    pcm    = ax.pcolormesh(lon5,lat5,clusts_remap[e],cmap=cmapn,transform=ccrs.PlateCarree())
+    ax     = viz.label_sp(e+1,usenumber=True,labelstyle="ens%s",ax=ax,fig=fig,x=0,y=1,alpha =0.75)
 
-# # Adjust classes
-# clusterPIC = remapcluster(inclust,lat5,lon5,regiondict)
+plt.savefig("%sCESM1-LE_HTR_ClusterResult.png"% (expdir),dpi=200,bbox_inches='tight')
 
-# # Plot some results (Clusters Themselves)
-# proj = ccrs.PlateCarree(central_longitude=180)
-# fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
-# ax     = viz.add_coast_grid(ax)
-# pcm=ax.pcolormesh(lon5,lat5,clusterPIC,cmap=cmapn,transform=ccrs.PlateCarree())
-# fig.colorbar(pcm,ax=ax,fraction=0.025)
-# ax.set_title("CESM-PiC Clusters (Year 400 to 2200)")
-# plt.savefig("%sCESM1PIC_%s_Clusters_all.png"%(outfigpath,expname),dpi=200,bbox_inches='tight')
+#%% Plot the uncertainties
 
-# # Now Plot the Uncertainties
-# vlm = [-10,10]
-# proj = ccrs.PlateCarree(central_longitude=180)
-# fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
-# ax     = viz.add_coast_grid(ax)
-# pcm=ax.pcolormesh(lon5,lat5,inuncert,vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
-# fig.colorbar(pcm,ax=ax,fraction=0.025)
-# ax.set_title(r"CESM-PIC Cluster Uncertainty $(<\sigma^{2}_{in,x}>/<\sigma^{2}_{out,x}>)$"+" \n (Year 400 to 2200) ")
-# plt.savefig("%sCESM1PIC_%s_Uncert_all.png"%(outfigpath,expname),dpi=200,bbox_inches='tight')
+fig,axs = plt.subplots(8,5,figsize=(24,16),
+                       subplot_kw={'projection':proj},constrained_layout=True)
+
+for e in tqdm(range(40)):
+    ax = axs.flatten()[e]
+    ax = viz.add_coast_grid(ax,fill_color="k",blabels=[0,0,0,0],bbox=bboxplot)
+    pcm=ax.pcolormesh(lon5,lat5,uncertin,vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+    ax     = viz.label_sp(e+1,usenumber=True,labelstyle="ens%s",ax=ax,fig=fig,x=0,y=1,alpha =0.75)
+
+plt.savefig("%sCESM1-LE_HTR_ClusterUncert.png"% (expdir),dpi=200,bbox_inches='tight')
+
+#%% Plot the silhouette score
+
+fig,axs = plt.subplots(8,5,figsize=(24,16),
+                       subplot_kw={'projection':proj},constrained_layout=True)
+
+for e in tqdm(range(40)):
+    ax = axs.flatten()[e]
+    ax = viz.add_coast_grid(ax,fill_color="k",blabels=[0,0,0,0],bbox=bboxplot)
+    pcm=ax.pcolormesh(lon5,lat5,uncerts[e][-1],vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+    ax     = viz.label_sp(e+1,usenumber=True,labelstyle="ens%s",ax=ax,fig=fig,x=0,y=1,alpha =0.75)
+
+plt.savefig("%sCESM1-LE_HTR_SScore.png"% (expdir),dpi=200,bbox_inches='tight')
+
 
 #%% Plot results again, but this time with the silhouette metric
 
