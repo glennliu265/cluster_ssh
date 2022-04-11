@@ -16,7 +16,7 @@ import matplotlib.cm as cm
 import xarray as xr
 import numpy as np
 
-import pygmt
+#import pygmt
 from tqdm import tqdm
 
 import os
