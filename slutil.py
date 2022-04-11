@@ -150,7 +150,7 @@ def lp_butter(varmon,cutofftime,order):
     b,a    = butter(order,cutoff,btype="lowpass")
     
     # Reshape input
-    if ~flag1d: # For 3d inputs, loop thru each point
+    if flag1d is False: # For 3d inputs, loop thru each point
         varmon = varmon.reshape(nmon,nlat*nlon)
         # Loop
         varfilt = np.zeros((nmon,nlat*nlon)) * np.nan
@@ -1188,3 +1188,81 @@ def elim_points_mc(sla,lat,lon,nclusters,maxiter,outfigpath,distthres=3000,
         return allclusters,alluncert,alluncertsig,allcount,rempts,allWk,alls,alls_byclust
     return allclusters,alluncert,alluncertsig,allcount,rempts,allWk
 
+#%% Synthetic Clustering Functions
+
+def return_ar1_model(invar,simlen):
+    
+    """
+    Creates AR1 model for input timeseries [invar] thru the following steps:
+    
+        1. Calculate Lag 1 Correlation Coefficient (R) and Effective DOF
+        2. Calculates variance of noise sigma = sqrt[(1-R^2)*var(invar)]
+        3. Integrate y(t) = R*y(t-1) + N(0,sigma) for [simlen] steps
+    
+    
+    Inputs
+    ------
+    1) invar [time x lat x lon] - input variable
+    2) simlen [int] - simulation length
+    
+    Outputs
+    -------
+    1) rednoisemodel [simlen x lat x lon]
+    2) ar1_map [lat x lon]
+    3) neff_map [lat x lon]
+    
+    """
+    
+    # --------------------------------
+    # Part 1: Calculate AR1 and N_eff
+    # --------------------------------
+    # Remove NaNs
+    ntime,nlat5,nlon5 = invar.shape
+    invar = invar.reshape(ntime,nlat5*nlon5)
+    okdata,knan,okpts = proc.find_nan(invar,dim=0)
+    npts = invar.shape[1]
+    nok = okdata.shape[1]
+    # Compute Lag 1 AR for each and effective DOF
+    ar1  = np.zeros(nok)
+    neff = np.zeros(nok) 
+    for i in range(nok):
+        
+        ts = okdata[:,i]
+        r = np.corrcoef(ts[1:],ts[:-1])[0,1]
+        ar1[i] = r
+        neff[i] = ntime*(1-r)/(1+r)
+    
+    # Replace into domain
+    ar1_map = np.zeros(npts)*np.nan
+    neff_map = np.zeros(npts)*np.nan
+    ar1_map[okpts] = ar1
+    neff_map[okpts] = neff
+    ar1_map = ar1_map.reshape(nlat5,nlon5)
+    neff_map = neff_map.reshape(nlat5,nlon5)
+    
+    # ---------------------------------------
+    # Part 2: Get variance and make AR1 model
+    # ---------------------------------------
+    
+    # Calulate variance of noise
+    invar = invar.reshape(ntime,nlat5,nlon5)
+    n_sigma = np.sqrt((1-ar1_map**2)*np.var(invar,0))
+    
+    # Create model
+    rednoisemodel = np.zeros((simlen,nlat5,nlon5))
+    noisets = np.random.normal(0,1,rednoisemodel.shape)
+    noisets *= n_sigma[None,:,:]
+    for i in range(1,simlen):
+        rednoisemodel[i,:,:] = ar1_map * rednoisemodel[i-1,:,:] + noisets[i,:,:]
+    
+    # ---------------------------
+    # Apply landice mask to model
+    # ---------------------------
+    msk = invar.copy()
+    msk = msk.sum(0)
+    msk[~np.isnan(msk)] = 1
+    rednoisemodel*=msk[None,:,:]
+    
+    vardiff = (np.var(invar,0)) - np.var(rednoisemodel,0)
+    #print("maximum difference in variance is %f"% np.nanmax(np.abs(vardiff)))
+    return rednoisemodel,ar1_map,neff_map
