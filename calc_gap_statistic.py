@@ -81,11 +81,46 @@ else:
 
 #%%
 
+def calc_Wk(sla_in,clusterrng):
+    """
+    sla_in [time x lon x lat]: input sea lvl anomalies
+    clusterrng : array of cluster thresholds to try
+    
+    stripped down section from elim_points function
+    
+    """
+    
+    
+    # Some other clustering params
+    distthres = 3000
+    absmode = 0
+    distmode = 0
+    uncertmode = 0
+    printmsg = False
+    calcsil=False
+    sigtest=False
+
+    ntime,nlon,nlat = sla_in.shape
+
+    # Preallocate
+    allWk = []
+    for c in tqdm(range(len(clusterng))):
+        nclusters = clusterng[c]
+        
+        # Perform Clustering
+        clustoutput = slutil.cluster_ssh(sla_in,lat,lon,nclusters,distthres=distthres,
+                                                     absmode=absmode,distmode=distmode,uncertmode=uncertmode,
+                                                     printmsg=printmsg,calcsil=calcsil,sigtest=sigtest)
+        
+        clustered,uncert,uncertsig,cluster_count,Wk = clustoutput
+        allWk.append(Wk.sum())
+    return allWk
+
 #%% Load some synthetic timeseries
 
 niter = 100
-fn = "%sNoiseMaps_AVISO_niter%i.npz"%(datpath,niter)
-ld = np.load(fn,allow_pickle=True)
+fn    = "%sNoiseMaps_AVISO_niter%i.npz"%(datpath,niter)
+ld    = np.load(fn,allow_pickle=True)
 wnout = ld['wnout'] # [iter x time x lon x lat]
 rnout = ld['rnout'] # [iter x time x lon x lat]
 lon   = ld['lon']
@@ -94,57 +129,71 @@ lat   = ld['lat']
 #%% Calculate the gap statistic (scrap)
 
 
-clusterng = np.arange(1,11,1) # Let's start by trying 10 clusters...
+clusterrng = np.arange(1,11,1) # Let's start by trying 10 clusters...
+sla_in     = wnout[0,:,:,:]
 
+Wk_test = np.zeros((2,niter,len(clusterrng)))*np.nan
+for i,noisetype in enumerate([wnout,rnout]):
+    for n in tqdm(range(niter)):
+        sla_in = noisetype[n,:,:,:]
+        allWk = calc_Wk(sla_in,clusterrng)
+        
+        Wk_test[i,n,:] = allWk
+        
+np.save("ScrapSave_Wk_test.npy",Wk_test)
+#%% Do the same for AVISO Dataset
 
-# Some other clustering params
-distthres = 3000
-absmode = 0
-distmode = 0
-uncertmode = 0
-printmsg = False
-calcsil=False
-sigtest=False
+enames = ["AVISO",
+          "AVISO (GMSL removed)"]
+fns = ["SSHA_LP_AVISO_1993-01_to_2013-01_remGMSL0_order5_cutoff15_remGMSL0.npz",
+       "SSHA_LP_AVISO_1993-01_to_2013-01_remGMSL1_order5_cutoff15_remGMSL1.npz"]
+ecolors = ["k","gray"]
 
-sla_in = wnout[0,:,:,:]
-
-nlat = len(lat)
-nlon = len(lon)
-
-# Preallocate
-# allclusters  = []
-# alluncert    = []
-# alluncertsig = []
-# allcount     = []
-allWk = []
-# if calcsil:
-#     alls           = []
-#     alls_byclust = []
-# rempts      = np.zeros((nlat*nlon))*np.nan
-
-for c in tqdm(range(len(clusterng))):
-    nclusters = clusterng[c]
+e_slas = []
+e_Wks = []
+for f in fns:
+    ld = np.load(datpath+f,allow_pickle=True)
+    e_slas.append(ld['sla_lp'])
+    Wk = calc_Wk(ld['sla_lp'],clusterrng)
+    e_Wks.append(Wk)
     
+
+
+
+#%% Plot Gap Statistic Results
+
+noisenames = ["White Noise","Red Noise"]
+noisecolor = ['b','r']
+
+fig,ax = plt.subplots(1,1)
+for i in range(2):
+    #for n in tqdm(range(niter)):
+        #ax.plot(clusterrng,Wk_test[i,n,...],alpha=0.25,color=noisecolor[i],label="")
+    ax.plot(clusterrng,np.log(Wk_test[i,...].mean(0)),color=noisecolor[i],label=noisenames[i])
+
+for i in range(2):
+    ax.plot(clusterrng,np.log(e_Wks[i]),color=ecolors[i],label=enames[i])
+
+ax.legend()
+ax.set_xlabel("Number of Clusters")
+ax.set_ylabel("log($W_k)$")
+ax.grid(True,ls='dotted')
+ax.set_xlim([1,10])
+ax.set_title("Total Within Cluster Distance ($W_k$) vs. Number of Clusters")
+#ax.set_ylim([])
+plt.savefig("Wk_test_plot.png",dpi=200)
+
     
-    # Perform Clustering
-    clustoutput = slutil.cluster_ssh(sla_in,lat,lon,nclusters,distthres=distthres,
-                                                 absmode=absmode,distmode=distmode,uncertmode=uncertmode,
-                                                 printmsg=printmsg,calcsil=calcsil,sigtest=sigtest)
-    
-    
-    if calcsil:
-        clustered,uncert,uncertsig,cluster_count,Wk,s,s_byclust = clustoutput
-        alls.append(s)
-        alls_byclust.append(s_byclust)
-    else:
-        clustered,uncert,uncertsig,cluster_count,Wk = clustoutput
-    
-    # Save results
-    #allclusters.append(clustered)
-    #alluncert.append(uncert)
-    #alluncertsig.append(uncertsig)
-    #allcount.append(cluster_count)
-    allWk.append(Wk.mean())
+
+
+#%% Try to actually calculate gap statistic
+plt.plot(np.log(Wk_test[0,...].mean(0))-np.log(e_Wks[1]))
+
+
+
+
+
+
 
 #%% Streamlined gap statistic calculation
 
