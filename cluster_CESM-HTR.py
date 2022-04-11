@@ -755,9 +755,9 @@ for e in range(40):
         
     # Set output name
     # ---------------
-    savename = "%sCESM_HTR_cluster_result_maxclust%i_minpt%i_maxiter%i_ens%02i.npz" % (datpath,nclusters,minpts,maxiter,e+1)
+    savename = "%sCESM_HTR_cluster_result_maxclust%i_minpt%i_maxiter%i_remgmsl%i_ens%02i.npz" % (datpath,nclusters,minpts,maxiter,rem_gmsl,e+1)
     
-
+    
     if recalc_clust:
         print("Recalculating clusters!")
         # Do Clustering
@@ -805,19 +805,39 @@ for e in range(40):
 # Make Region Colors
 cmapn,regiondict = slutil.get_regions()
 
-clusts_remap = []
-remapdicts   = []
+
+
+    
+clusts_remap     = []
+remapdicts       = []
+sremap           = []
 for e_sel in range(40):
     
     # Select the FINAL clustering result!!
     clusterin = clusts[e_sel][-1]
     uncertin  = uncerts[e_sel][-1]
     remptsin  = rempts[e_sel]
+    s_in      = sscores[e_sel][-1] # pts
     
     # Rearrange clustering number
     clusternew,remapdict = slutil.remapcluster(clusterin,lat5,lon5,regiondict,returnremap=True)
     clusts_remap.append(clusternew)
     remapdicts.append(remapdict)
+    
+    # Remap the silhouette scores
+    ldname = ldnames[e]
+    ld     = np.load(ldname,allow_pickle=True)
+    sla_in = ld['sla_lp']
+    
+    # Note that this does not include points removed during iterative process
+    rempts_mask = np.ones((nlat5,nlon5))
+    rempts_mask[~np.isnan(remptsin)] = np.nan # Mask out removed points with NaN
+    srho,scov,sdist,okdata,okpts,coords2=slutil.calc_matrices(sla_in*rempts_mask,lon5,lat5,return_all=True)
+    
+    
+    remap_sil = proc.remap_nan(lon5,lat5,s_in,okpts,lonfirst=False)
+    sremap.append(remap_sil)
+    
 # -------------
 #%% Plot Clusters
 # -------------
@@ -885,7 +905,7 @@ for e in tqdm(range(40)):
     pcm    = ax.pcolormesh(lon5,lat5,clusts_remap[e],cmap=cmapn,transform=ccrs.PlateCarree())
     ax     = viz.label_sp(e+1,usenumber=True,labelstyle="ens%s",ax=ax,fig=fig,x=0,y=1,alpha =0.75)
 
-plt.savefig("%sCESM1-LE_HTR_ClusterResult.png"% (expdir),dpi=200,bbox_inches='tight')
+plt.savefig("%sCESM1-LE_HTR_ClusterResult_remgmsl%i.png"% (expdir,remgmsl),dpi=200,bbox_inches='tight')
 
 #%% Plot the uncertainties
 
@@ -898,7 +918,7 @@ for e in tqdm(range(40)):
     pcm=ax.pcolormesh(lon5,lat5,uncertin,vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
     ax     = viz.label_sp(e+1,usenumber=True,labelstyle="ens%s",ax=ax,fig=fig,x=0,y=1,alpha =0.75)
 
-plt.savefig("%sCESM1-LE_HTR_ClusterUncert.png"% (expdir),dpi=200,bbox_inches='tight')
+plt.savefig("%sCESM1-LE_HTR_ClusterUncert_remgmsl%i.png"% (expdir,rem_gmsl),dpi=200,bbox_inches='tight')
 
 #%% Plot the silhouette score
 
@@ -908,10 +928,10 @@ fig,axs = plt.subplots(8,5,figsize=(24,16),
 for e in tqdm(range(40)):
     ax = axs.flatten()[e]
     ax = viz.add_coast_grid(ax,fill_color="k",blabels=[0,0,0,0],bbox=bboxplot)
-    pcm=ax.pcolormesh(lon5,lat5,uncerts[e][-1],vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+    pcm=ax.pcolormesh(lon5,lat5,sremap[e],vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
     ax     = viz.label_sp(e+1,usenumber=True,labelstyle="ens%s",ax=ax,fig=fig,x=0,y=1,alpha =0.75)
 
-plt.savefig("%sCESM1-LE_HTR_SScore.png"% (expdir),dpi=200,bbox_inches='tight')
+plt.savefig("%sCESM1-LE_HTR_SScore_remgmsl%i.png"% (expdir,rem_gmsl),dpi=200,bbox_inches='tight')
 
 
 #%% Plot results again, but this time with the silhouette metric
