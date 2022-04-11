@@ -253,163 +253,88 @@ def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath,title=None):
     return fig,ax,fig1,ax1
     
 
-def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
-                absmode=0,distmode=0,uncertmode=0,viz=True,printmsg=True,
-                calcsil=False):
+# def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000,
+#                 absmode=0,distmode=0,uncertmode=0,viz=True,printmsg=True,
+#                 calcsil=False):
     
-    ntime,nlat,nlon = sla.shape
-    slain = sla.copy()
+#     ntime,nlat,nlon = sla.shape
+#     slain = sla.copy()
     
-    # Preallocate
-    allclusters = []
-    alluncert   = []
-    allcount    = []
-    allWk = []
-    if calcsil:
-        alls           = []
-        alls_byclust = []
-    rempts      = np.zeros((nlat*nlon))*np.nan
+#     # Preallocate
+#     allclusters = []
+#     alluncert   = []
+#     allcount    = []
+#     allWk = []
+#     if calcsil:
+#         alls           = []
+#         alls_byclust = []
+#     rempts      = np.zeros((nlat*nlon))*np.nan
     
-    # Loop
-    flag = True
-    it   = 0
-    while flag and it < maxiter:
+#     # Loop
+#     flag = True
+#     it   = 0
+#     while flag and it < maxiter:
         
-        if printmsg:
-            print("Iteration %i ========================="%it)
-        expname = "iteration%02i" % (it+1)
-        #print("Iteration %i ========================="%it)
+#         if printmsg:
+#             print("Iteration %i ========================="%it)
+#         expname = "iteration%02i" % (it+1)
+#         #print("Iteration %i ========================="%it)
         
-        # Perform Clustering
-        clustoutput = cluster_ssh(slain,lat,lon,nclusters,distthres=distthres,
-                                                     absmode=absmode,distmode=distmode,uncertmode=uncertmode,
-                                                     printmsg=printmsg,calcsil=calcsil)
+#         # Perform Clustering
+#         clustoutput = cluster_ssh(slain,lat,lon,nclusters,distthres=distthres,
+#                                                      absmode=absmode,distmode=distmode,uncertmode=uncertmode,
+#                                                      printmsg=printmsg,calcsil=calcsil)
         
-        if calcsil:
-            clustered,uncert,cluster_count,Wk,s,s_byclust = clustoutput
-            alls.append(s)
-            alls_byclust.append(s_byclust)
-        else:
-            clustered,uncert,cluster_count,Wk = clustoutput
+#         if calcsil:
+#             clustered,uncert,cluster_count,Wk,s,s_byclust = clustoutput
+#             alls.append(s)
+#             alls_byclust.append(s_byclust)
+#         else:
+#             clustered,uncert,cluster_count,Wk = clustoutput
         
-        # Save results
-        allclusters.append(clustered)
-        alluncert.append(uncert)
-        allcount.append(cluster_count)
-        allWk.append(Wk)
+#         # Save results
+#         allclusters.append(clustered)
+#         alluncert.append(uncert)
+#         allcount.append(cluster_count)
+#         allWk.append(Wk)
         
-        if viz:
-            # Visualize Results
-            fig,ax,fig1,ax1 = plot_results(clustered,uncert,expname,lat,lon,outfigpath)
+#         if viz:
+#             # Visualize Results
+#             fig,ax,fig1,ax1 = plot_results(clustered,uncert,expname,lat,lon,outfigpath)
             
 
         
-        # Check cluster counts
-        for i in range(nclusters):
-            cid = i+1
+#         # Check cluster counts
+#         for i in range(nclusters):
+#             cid = i+1
             
-            flag = False
-            if cluster_count[i] < minpts:
+#             flag = False
+#             if cluster_count[i] < minpts:
                 
-                flag = True # Set flag to continue running
-                print("\tCluster %i (count=%i) will be removed" % (cid,cluster_count[i]))
+#                 flag = True # Set flag to continue running
+#                 print("\tCluster %i (count=%i) will be removed" % (cid,cluster_count[i]))
                 
-                clusteredrs = clustered.reshape(nlat*nlon)
-                slainrs = slain.reshape(ntime,nlat*nlon)
+#                 clusteredrs = clustered.reshape(nlat*nlon)
+#                 slainrs = slain.reshape(ntime,nlat*nlon)
                 
                 
-                slainrs[:,clusteredrs==cid] = np.nan # Assign NaN Values
-                rempts[clusteredrs==cid] = it # Record iteration of removal
+#                 slainrs[:,clusteredrs==cid] = np.nan # Assign NaN Values
+#                 rempts[clusteredrs==cid] = it # Record iteration of removal
                 
-                slain = slainrs.reshape(ntime,nlat,nlon)
-        # if removeflag:
-        #     flag = True
-        # else:
-        #     flag = False
-        it += 1
-    if printmsg:
-        print("COMPLETE after %i iterations"%it)
-    rempts = rempts.reshape(nlat,nlon)
-    if calcsil:
-        return allclusters,alluncert,allcount,rempts,allWk,alls,alls_byclust
-    return allclusters,alluncert,allcount,rempts,allWk
+#                 slain = slainrs.reshape(ntime,nlat,nlon)
+#         # if removeflag:
+#         #     flag = True
+#         # else:
+#         #     flag = False
+#         it += 1
+#     if printmsg:
+#         print("COMPLETE after %i iterations"%it)
+#     rempts = rempts.reshape(nlat,nlon)
+#     if calcsil:
+#         return allclusters,alluncert,allcount,rempts,allWk,alls,alls_byclust
+#     return allclusters,alluncert,allcount,rempts,allWk
 
-def return_ar1_model(invar,simlen):
-    
-    """
-    Creates AR1 model for input timeseries [invar] thru the following steps:
-    
-        1. Calculate Lag 1 Correlation Coefficient (R) and Effective DOF
-        2. Calculates variance of noise sigma = sqrt[(1-R^2)*var(invar)]
-        3. Integrate y(t) = R*y(t-1) + N(0,sigma) for [simlen] steps
-    
-    
-    Inputs
-    ------
-    1) invar [time x lat x lon] - input variable
-    2) simlen [int] - simulation length
-    
-    Outputs
-    -------
-    1) rednoisemodel [simlen x lat x lon]
-    2) ar1_map [lat x lon]
-    3) neff_map [lat x lon]
-    
-    """
-    
-    # --------------------------------
-    # Part 1: Calculate AR1 and N_eff
-    # --------------------------------
-    # Remove NaNs
-    ntime,nlat5,nlon5 = invar.shape
-    invar = invar.reshape(ntime,nlat5*nlon5)
-    okdata,knan,okpts = proc.find_nan(invar,dim=0)
-    npts = invar.shape[1]
-    nok = okdata.shape[1]
-    # Compute Lag 1 AR for each and effective DOF
-    ar1  = np.zeros(nok)
-    neff = np.zeros(nok) 
-    for i in range(nok):
-        
-        ts = okdata[:,i]
-        r = np.corrcoef(ts[1:],ts[:-1])[0,1]
-        ar1[i] = r
-        neff[i] = ntime*(1-r)/(1+r)
-    
-    # Replace into domain
-    ar1_map = np.zeros(npts)*np.nan
-    neff_map = np.zeros(npts)*np.nan
-    ar1_map[okpts] = ar1
-    neff_map[okpts] = neff
-    ar1_map = ar1_map.reshape(nlat5,nlon5)
-    neff_map = neff_map.reshape(nlat5,nlon5)
-    
-    # ---------------------------------------
-    # Part 2: Get variance and make AR1 model
-    # ---------------------------------------
-    
-    # Calulate variance of noise
-    invar = invar.reshape(ntime,nlat5,nlon5)
-    n_sigma = np.sqrt((1-ar1_map**2)*np.var(invar,0))
-    
-    # Create model
-    rednoisemodel = np.zeros((simlen,nlat5,nlon5))
-    noisets = np.random.normal(0,1,rednoisemodel.shape)
-    noisets *= n_sigma[None,:,:]
-    for i in range(1,simlen):
-        rednoisemodel[i,:,:] = ar1_map * rednoisemodel[i-1,:,:] + noisets[i,:,:]
-    
-    # ---------------------------
-    # Apply landice mask to model
-    # ---------------------------
-    msk = invar.copy()
-    msk = msk.sum(0)
-    msk[~np.isnan(msk)] = 1
-    rednoisemodel*=msk[None,:,:]
-    
-    vardiff = (np.var(invar,0)) - np.var(rednoisemodel,0)
-    #print("maximum difference in variance is %f"% np.nanmax(np.abs(vardiff)))
-    return rednoisemodel,ar1_map,neff_map
+
 
 #%%
 # Load data (preproc, then anomalized)
@@ -775,7 +700,7 @@ def bootstrap_ssh(ssha,niter,tw,order,simlen=10000):
         wnstd     *= aviso_std[None,:,:]
     
         # Get stddev and AR1 for red noise timeseries
-        rnstd,ar1m,neffm = return_ar1_model(ssha,simlen)
+        rnstd,ar1m,neffm = slutil.return_ar1_model(ssha,simlen)
 
         # Select the last n points (match sample size of aviso)
         wnstd = wnstd[-ntime:,:,:]
@@ -794,9 +719,9 @@ def bootstrap_ssh(ssha,niter,tw,order,simlen=10000):
 
 #%% Make synthetic timeseries
 
-simlen = 5000
+simlen = 1000
 sshin  = ssha
-niter  = 1000
+niter  = 100
 wnout,rnout,ar1m,neffm = bootstrap_ssh(sshin,niter,tw,order,simlen=simlen)
 
 # Save output
@@ -831,7 +756,7 @@ wnstd = wn.copy()
 wnstd *= aviso_std[None,:,:]
 
 # Make red noise timeseries
-rnstd,ar1m,neffm = return_ar1_model(ssha,simlen)
+rnstd,ar1m,neffm = slutil.return_ar1_model(ssha,simlen)
 
 #
 # % Plot AR1 Map ----------
@@ -940,7 +865,7 @@ snamelong  = "Distance Only"
 expname    = "AVISO_DistanceOnly_nclusters%i_Filtered_" % (nclusters)
 #expname    = "AVISO_WhiteNoise_nclusters%i_Filtered_" % (nclusters)
 #expname = "AVISO_WhiteNoise_chardist%i_nclusters%i_Filtered_" % (chardist,nclusters)
-distmode   = 1
+distmode   = 0
 absmode    = 0
 uncertmode = 0
 
@@ -1040,6 +965,10 @@ plt.savefig("%sSynthetic_SilhouettePlot_%s.png"%(outfigpath,expname),dpi=200,bbo
 
 
 
+#
+# %% Calculate Wk for white and red noise timeseries
+#
+
 
 
 # -------------------------------------------------------------
@@ -1065,8 +994,8 @@ if not checkdir:
 else:
     print(expdir+" was found!")
 
-allclusters,alluncert,allcount,rempts,allWk = elim_points(varin,lat5,lon5,nclusters,minpts,maxiter,expdir,
-                                                    absmode=absmode,distmode=distmode,uncertmode=uncertmode)
+allclusters,alluncert,alluncertsig,allcount,rempts,allWk = slutil.elim_points(varin,lat5,lon5,nclusters,minpts,maxiter,expdir,
+                                                    absmode=absmode,distmode=distmode,uncertmode=uncertmode,sigtest=False)
 
 
 #
@@ -1083,7 +1012,7 @@ Wknulls = []
 clusters = []
 cnull = []
 for i in nclustall:
-    clustered,uncert,cluster_count,Wk = cluster_ssh(varin,lat5,lon5,i,distthres=3000,
+    clustered,uncert,cluster_count,Wk = slutil.cluster_ssh(varin,lat5,lon5,i,distthres=3000,
                                                          absmode=absmode,distmode=distmode,uncertmode=uncertmode)
     
     clusterednull,uncert,cluster_count,Wknull = cluster_ssh(wn,lat5,lon5,i,distthres=3000,
