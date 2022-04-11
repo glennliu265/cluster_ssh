@@ -43,7 +43,7 @@ import tbx
 
 # Set Paths
 datpath    = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/01_Data/01_Proc/"
-outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210610/"
+outfigpath = "/Users/gliu/Downloads/02_Research/01_Projects/03_SeaLevel/02_Figures/20210818/"
 
 # Experiment Names
 start       = '1993-01'
@@ -51,7 +51,7 @@ end         = '2013-01'
 #start      = '1850-01'
 #end        = '2100-12'
 nclusters   = 6
-rem_gmsl    = True
+rem_gmsl    = False
 maxiter     = 5  # Number of iterations for elimiting points
 minpts      = 30 # Minimum points per cluster
 
@@ -230,8 +230,6 @@ def cluster_ssh(sla,lat,lon,nclusters,distthres=3000,
         return clustered,uncert,uncertsig,cluster_count,srho,scov,sdist,distance_matrix
     return clustered,uncert,uncertsig,cluster_count
 
-
-
 def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath):
     
     # Set some defaults
@@ -280,12 +278,8 @@ def plot_results(clustered,uncert,expname,lat5,lon5,outfigpath):
         #fig.colorbar(pcm,ax=ax)
     ax1.set_title("Clustering Output (nclusters=%i) %s "% (nclusters,expname))
     plt.savefig(outfigpath+"Cluster_with_Shaded_uncertainties_%s.png" % expname,dpi=200)
-    
-    
-
     return fig,ax,fig1,ax1
     
-
 def elim_points(sla,lat,lon,nclusters,minpts,maxiter,outfigpath,distthres=3000):
     
     ntime,nlat,nlon = sla.shape
@@ -445,7 +439,7 @@ plt.savefig("%sFilter_Transfer_%imonLP_%ibandavg_%s.png"%(expdir,tw,M,expname),d
 # Save results
 # ---
 if savesteps: # Save low-pass-filtered result, right before clustering
-    outname = "%sSSHA_LP_%s_order%i_cutoff%i.npz" % (datpath,datname,order,tw)
+    outname = "%sSSHA_LP_%s_order%i_cutoff%i_remGMSL%i.npz" % (datpath,datname,order,tw,rem_gmsl)
     print("Saved to: %s"%outname)
     np.savez(outname,**{
         'sla_lp':sla_lp,
@@ -455,23 +449,28 @@ if savesteps: # Save low-pass-filtered result, right before clustering
         })
 #%% Perform Clustering
 
-allclusters,alluncert,allcount,remptsall,Wk,alls,alls_byclust = slutil.elim_points(sla_lp,lat5,lon5,
-                                                                                   nclusters,minpts,maxiter,expdir,calcsil=True)
+maxiter = 1
+#minpts  = 30
 
+# allclusters,alluncert,alluncertsig,allcount,remptsall,Wk,alls,alls_byclust = slutil.elim_points(sla_lp,lat5,lon5,
+#                                                                                     nclusters,minpts,maxiter,expdir,calcsil=True)
+
+allclusters,alluncert,alluncertsig,allcount,remptsall,Wk,alls,alls_byclust = slutil.elim_points_mc(sla_lp,lat5,lon5,
+                                                                                    nclusters,maxiter,expdir,calcsil=True)
 
 #%% Make Clustering Map
 
-
-
 # Dictionary of Bounding Boxes to search thru
+it        = 0
 # Inputs
-clusterin = allclusters[-1]
-uncertin = alluncert[-1]
-rempts = remptsall
-vlm = [-10,10]
+clusterin = allclusters[it]
+uncertin  = alluncert[it]
+uncertsig = alluncertsig[it]
+rempts    = remptsall
+vlm       = [-10,10]
 nclusters = 6
-
-sameplot=True
+plotsig   = True
+sameplot  = False
 
 # Make Region Colors
 cmapn,regiondict = slutil.get_regions()
@@ -485,6 +484,7 @@ proj = ccrs.PlateCarree(central_longitude=180)
 # Rearrange clustering number
 clusternew,remapdict = slutil.remapcluster(clusterin,lat5,lon5,regiondict,returnremap=True)
 
+
 # -------------
 # Plot Clusters
 # -------------
@@ -493,23 +493,33 @@ if sameplot:
     ax = axs[0]
 else:
     fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
-ax     = viz.add_coast_grid(ax)
+ax     = slutil.add_coast_grid(ax)
 pcm    = ax.pcolormesh(lon5,lat5,clusternew,cmap=cmapn,transform=ccrs.PlateCarree())
 #ax.pcolor(lon5,lat5,rempts,cmap='Greys',transform=ccrs.PlateCarree(),hatch=":")
 for o in range(nlon5):
     for a in range(nlat5):
-        pt = rempts[a,o]
+        if plotsig:
+            pt  = uncertsig[a,o]
+            if pt == 1:
+                pt = np.nan
+        else: # Just plot removed points
+            pt = rempts[a,o]
+        
+        
         if np.isnan(pt):
             continue
-        else:
+        else: # Plot the removed points
             ax.scatter(lon5[o],lat5[a],s=10,marker="x",color="k",transform=ccrs.PlateCarree())
+            
 fig.colorbar(pcm,ax=ax,fraction=0.025)
 ax.set_title("AVISO Clusters (%s to %s)"%(start,end))
 if sameplot:
     ax = axs[1]
 else:
-    plt.savefig("%s%s_ClustersMap.png"%(expdir,expname),dpi=200,bbox_inches='tight')
+    plt.savefig("%s%s_ClustersMap_iter%i.png"%(expdir,expname,it),dpi=200,bbox_inches='tight')
     fig,ax = plt.subplots(1,1,subplot_kw={'projection':proj})
+    
+
 # ------------------
 # Plot Uncertainties
 # ------------------
@@ -631,10 +641,6 @@ plt.savefig("%sCESM1PIC_%s_SilhouetteMap_k%s%i_%s_gmslnew.png"%(outfigpath,expna
 
 #%%
 
-
-
-
-
 # # Set some defaults
 # ucolors = ('Reds','Greys','Blues','Reds','Oranges','Greens')
 # proj = ccrs.PlateCarree(central_longitude=180)
@@ -656,11 +662,6 @@ plt.savefig("%sCESM1PIC_%s_SilhouetteMap_k%s%i_%s_gmslnew.png"%(outfigpath,expna
 #     #fig.colorbar(pcm,ax=ax)
 # ax1.set_title("Clustering Output (nclusters=%i) "% (nclusters))
 # plt.savefig(outfigpath+"Cluster_with_Shaded_uncertainties_%s.png" % expname,dpi=200)
-
-    
-
-
-
 
 #plt.pcolormesh(allclusters[0])
 
