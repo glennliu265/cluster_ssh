@@ -57,7 +57,7 @@ end          = '2005-12'
 e            = 0  # Ensemble index (ensnum-1), remove after loop is developed
 
 nclusters    = 6
-rem_gmsl     = False
+rem_gmsl     = True
 maxiter      = 5  # Number of iterations for elimiting points
 minpts       = 30 # Minimum points per cluster
 
@@ -905,7 +905,7 @@ for e in tqdm(range(40)):
     pcm    = ax.pcolormesh(lon5,lat5,clusts_remap[e],cmap=cmapn,transform=ccrs.PlateCarree())
     ax     = viz.label_sp(e+1,usenumber=True,labelstyle="ens%s",ax=ax,fig=fig,x=0,y=1,alpha =0.75)
 
-plt.savefig("%sCESM1-LE_HTR_ClusterResult_remgmsl%i.png"% (expdir,remgmsl),dpi=200,bbox_inches='tight')
+plt.savefig("%sCESM1-LE_HTR_ClusterResult_remgmsl%i.png"% (expdir,rem_gmsl),dpi=200,bbox_inches='tight')
 
 #%% Plot the uncertainties
 
@@ -915,20 +915,21 @@ fig,axs = plt.subplots(8,5,figsize=(24,16),
 for e in tqdm(range(40)):
     ax = axs.flatten()[e]
     ax = viz.add_coast_grid(ax,fill_color="k",blabels=[0,0,0,0],bbox=bboxplot)
-    pcm=ax.pcolormesh(lon5,lat5,uncertin,vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+    pcm=ax.pcolormesh(lon5,lat5,uncerts[e][-1],vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
     ax     = viz.label_sp(e+1,usenumber=True,labelstyle="ens%s",ax=ax,fig=fig,x=0,y=1,alpha =0.75)
 
 plt.savefig("%sCESM1-LE_HTR_ClusterUncert_remgmsl%i.png"% (expdir,rem_gmsl),dpi=200,bbox_inches='tight')
 
 #%% Plot the silhouette score
 
+vlm_sil = [-.5,.5]
 fig,axs = plt.subplots(8,5,figsize=(24,16),
                        subplot_kw={'projection':proj},constrained_layout=True)
 
 for e in tqdm(range(40)):
-    ax = axs.flatten()[e]
-    ax = viz.add_coast_grid(ax,fill_color="k",blabels=[0,0,0,0],bbox=bboxplot)
-    pcm=ax.pcolormesh(lon5,lat5,sremap[e],vmin=vlm[0],vmax=vlm[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
+    ax     = axs.flatten()[e]
+    ax     = viz.add_coast_grid(ax,fill_color="k",blabels=[0,0,0,0],bbox=bboxplot)
+    pcm    = ax.pcolormesh(lon5,lat5,sremap[e],vmin=vlm_sil[0],vmax=vlm_sil[-1],cmap=cmocean.cm.balance,transform=ccrs.PlateCarree())
     ax     = viz.label_sp(e+1,usenumber=True,labelstyle="ens%s",ax=ax,fig=fig,x=0,y=1,alpha =0.75)
 
 plt.savefig("%sCESM1-LE_HTR_SScore_remgmsl%i.png"% (expdir,rem_gmsl),dpi=200,bbox_inches='tight')
