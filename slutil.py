@@ -290,7 +290,7 @@ def calc_silhouette(distance_matrix,clusterout,nclusters):
         
         # Calculate silhouette score (1 value)
         s_score = silhouette_score(distance_matrix,clusterout,metric="precomputed")
-    
+        
         # Calculate the silhouette for each point
         s       = silhouette_samples(distance_matrix,clusterout,metric='precomputed')
         #print("Calculated from SKlearn is %.3f" % s_score)
